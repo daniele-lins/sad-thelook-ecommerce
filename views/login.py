@@ -30,4 +30,4 @@ def renderizar():
                     st.error("Usuário ou senha incorretos.")
         
         # Dica visual para facilitar os testes (e para o professor!)
-        st.info("💡 **Credenciais de teste:**\n- **Usuário:** `admin@ecommerce.com`\n- **Senha:** `123456`")
+        # st.info("💡 **Credenciais de teste:**\n- **Usuário:** `admin@ecommerce.com`\n- **Senha:** `123456`")

@@ -6,3 +6,7 @@ Para rodar o programa, execute os seguintes comandos no terminal:
 - `.\venv\Scripts\activate`
 - `pip install requirements.txt`
 - `streamlit run app.py`
+
+Credenciais de teste:
+- Usuário: admin@ecommerce.com
+- Senha: 123456
