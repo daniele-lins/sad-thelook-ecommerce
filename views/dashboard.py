@@ -1,5 +1,4 @@
 import streamlit as st
-import duckdb
 import plotly.express as px
 import pandas as pd
 import datetime 
@@ -78,12 +77,13 @@ def renderizar(con):
     )
 
     # ==========================================
-    # 2. BIG NUMBERS (CARTÕES DE DESTAQUE)
+    # SEÇÃO 1: TRÁFEGO E FUNIL DE NAVEGAÇÃO
     # ==========================================
-    st.markdown("### 🔍 Topo e Meio de Funil")
+    st.subheader("🌐 Tráfego e Funil de Navegação")
+
+    # --- Big Numbers do Funil ---
     col_bn1, col_bn2, col_bn3 = st.columns(3)
 
-    # Consultas de eventos com JOIN em users para permitir filtro de país
     q_sessoes = (
         con.execute(
             f"SELECT COUNT(DISTINCT e.session_id) FROM events e LEFT JOIN users u ON e.user_id = u.id {clause_ev}"
@@ -128,64 +128,7 @@ def renderizar(con):
     col_bn3.metric("Abandono de Carrinho", f"{tx_abandono:.2f}%")
 
     st.markdown("---")
-
-    st.markdown("### 💰 Fundo de Funil e Retenção")
-    c1, c2, c3, c4, c5 = st.columns(5)
-
-    sql_fin = f"""
-        SELECT 
-            COALESCE(SUM(oi.sale_price), 0) AS receita, 
-            COALESCE(SUM(oi.sale_price - p.cost), 0) AS lucro, 
-            COUNT(DISTINCT oi.order_id) AS total_pedidos, 
-            COUNT(DISTINCT oi.user_id) AS total_clientes 
-        FROM order_items oi 
-        JOIN products p ON oi.product_id = p.id 
-        JOIN users u ON oi.user_id = u.id 
-        {where_complete}
-    """
-    res_fin = con.execute(sql_fin).fetchone()
-
-    # Extração correta dos elementos da tupla
-    receita = res_fin[0] if res_fin else 0.0
-    lucro = res_fin[1] if res_fin else 0.0
-    pedidos = res_fin[2] if (res_fin and res_fin[2] > 0) else 1
-    clientes = res_fin[3] if (res_fin and res_fin[3] > 0) else 1
-
-    aov = receita / pedidos
-    ltv = receita / clientes
-
-    sql_recompra = f"""
-        WITH compras AS ( 
-            SELECT o.user_id, COUNT(DISTINCT o.order_id) as qtd 
-            FROM orders o 
-            JOIN users u ON o.user_id = u.id 
-            JOIN order_items oi ON o.order_id = oi.order_id 
-            {clause_ord} 
-            GROUP BY o.user_id 
-        ) 
-        SELECT COALESCE(COUNT(CASE WHEN qtd > 1 THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 0) 
-        FROM compras
-    """
-    tx_recompra = con.execute(sql_recompra).fetchone()[0] or 0.0
-
-    c1.metric(
-        "Receita Total",
-        f"US$ {receita/1e6:.2f} mi" if receita >= 1e6 else f"US$ {receita:,.2f}",
-    )
-    c2.metric(
-        "Lucro Bruto",
-        f"US$ {lucro/1e6:.2f} mi" if lucro >= 1e6 else f"US$ {lucro:,.2f}",
-    )
-    c3.metric("Ticket Médio (AOV)", f"US$ {aov:.2f}")
-    c4.metric("LTV Médio", f"US$ {ltv:.2f}")
-    c5.metric("Taxa de Recompra", f"{tx_recompra:.1f}%")
-
-    st.markdown("---")
-
-    # ==========================================
-    # 3. SEÇÃO 1: TRÁFEGO E FUNIL
-    # ==========================================
-    st.subheader("🌐 Tráfego e Funil de Navegação")
+    
     col_f1, col_f2 = st.columns(2)
 
     with col_f1:
@@ -210,11 +153,11 @@ def renderizar(con):
         """
         ).df()
         cores_funil = { 
-                       "Página Inicial": "#76B5E7", 
-                       "Departamento": "#76B5E7", 
-                       "Produto": "#76B5E7", 
-                       "Carrinho": "#d97724", # Destaque em Laranja 
-                       "Compra": "#107c41", # Sucesso em Verde 
+                       "Página Inicial": "#6bc7ad", 
+                       "Departamento": "#6bc7ad", 
+                       "Produto": "#6bc7ad", 
+                       "Carrinho": "#2a7b62",
+                       "Compra": "#1b4d3e", # Sucesso em Verde 
                        "Cancelamento": "#c93b2b" # Alerta em Vermelho 
                        }
         ordem_etapas = ["Página Inicial", "Departamento", "Produto", "Carrinho", "Compra", "Cancelamento"]
@@ -263,10 +206,44 @@ def renderizar(con):
         st.plotly_chart(fig_conv, use_container_width=True)
 
     # ==========================================
-    # 4. SEÇÃO 2: VENDAS, PRODUTOS E RETENÇÃO
+    # SEÇÃO 2: DESEMPENHO FINANCEIRO E VENDAS
     # ==========================================
     st.markdown("---")
-    st.subheader("🛍️ Vendas, Produtos e Retenção")
+    st.subheader("💰 Desempenho Financeiro e Vendas")
+
+    # --- Big Numbers Financeiros ---
+    c_f1, c_f2, c_f3 = st.columns(3)
+
+    sql_fin = f"""
+        SELECT 
+            COALESCE(SUM(oi.sale_price), 0) AS receita, 
+            COALESCE(SUM(oi.sale_price - p.cost), 0) AS lucro, 
+            COUNT(DISTINCT oi.order_id) AS total_pedidos 
+        FROM order_items oi 
+        JOIN products p ON oi.product_id = p.id 
+        JOIN users u ON oi.user_id = u.id 
+        {where_complete}
+    """
+    res_fin = con.execute(sql_fin).fetchone()
+
+    receita = res_fin[0] if res_fin else 0.0
+    lucro = res_fin[1] if res_fin else 0.0
+    pedidos = res_fin[2] if (res_fin and res_fin[2] > 0) else 1
+
+    aov = receita / pedidos
+
+    c_f1.metric(
+        "Receita Total",
+        f"US$ {receita/1e6:.2f} mi" if receita >= 1e6 else f"US$ {receita:,.2f}",
+    )
+    c_f2.metric(
+        "Lucro Bruto",
+        f"US$ {lucro/1e6:.2f} mi" if lucro >= 1e6 else f"US$ {lucro:,.2f}",
+    )
+    c_f3.metric("Ticket Médio (AOV)", f"US$ {aov:.2f}")
+
+    st.markdown("---")
+
     col_v1, col_v2 = st.columns(2)
 
     with col_v1:
@@ -382,3 +359,279 @@ def renderizar(con):
             yaxis=dict(autorange="reversed"), xaxis_title="Vendas (US$)"
         )
         st.plotly_chart(fig_brand, use_container_width=True)
+    
+    # ==========================================
+    # SEÇÃO 3: RETENÇÃO E VALOR DE LONGO PRAZO
+    # ==========================================
+    st.markdown("---")
+    st.subheader("🔄 Retenção e Valor de Longo Prazo")
+
+    # --- 1. Big Numbers ---
+    c_r1, c_r2 = st.columns(2)
+
+    sql_ltv = f"""
+        SELECT 
+            COALESCE(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT oi.user_id), 0), 0) 
+        FROM order_items oi 
+        JOIN users u ON oi.user_id = u.id 
+        {where_complete}
+    """
+    ltv = con.execute(sql_ltv).fetchone()[0] or 0.0
+
+    sql_recompra = f"""
+        WITH compras AS ( 
+            SELECT 
+                oi.user_id, 
+                COUNT(DISTINCT oi.order_id) as qtd 
+            FROM order_items oi 
+            JOIN users u ON oi.user_id = u.id
+            {where_complete} 
+            GROUP BY oi.user_id 
+        ) 
+        SELECT 
+            COALESCE(COUNT(CASE WHEN qtd > 1 THEN 1 END) * 100.0 / NULLIF(COUNT(*), 0), 0) 
+        FROM compras
+    """
+    tx_recompra = con.execute(sql_recompra).fetchone()[0] or 0.0
+
+    c_r1.metric("LTV Médio por Cliente", f"US$ {ltv:.2f}")
+    c_r2.metric("Taxa de Recompra (Fidelidade)", f"{tx_recompra:.1f}%")
+
+    st.markdown("---")
+
+    # --- 2. Gráficos de Retenção ---
+    col_ret1, col_ret2 = st.columns(2)
+
+    # Gráfico 1: Frequência de Compras por Cliente
+    with col_ret1:
+        st.markdown("**Frequência de Compras por Cliente**")
+        df_freq = con.execute(
+            f"""
+            WITH contagem AS ( 
+                SELECT 
+                    oi.user_id, 
+                    COUNT(DISTINCT oi.order_id) as total_pedidos 
+                FROM order_items oi 
+                JOIN users u ON oi.user_id = u.id 
+                {where_complete} 
+                GROUP BY oi.user_id 
+            ) 
+            SELECT 
+                CASE 
+                    WHEN total_pedidos = 1 THEN '1 pedido' 
+                    WHEN total_pedidos = 2 THEN '2 pedidos' 
+                    WHEN total_pedidos BETWEEN 3 AND 5 THEN '3 a 5 pedidos' 
+                    ELSE '6+ pedidos' 
+                END AS "Faixa de Pedidos", 
+                COUNT(user_id) AS "Clientes" 
+            FROM contagem 
+            GROUP BY 1 
+            ORDER BY 
+                CASE "Faixa de Pedidos" 
+                    WHEN '1 pedido' THEN 1 
+                    WHEN '2 pedidos' THEN 2 
+                    WHEN '3 a 5 pedidos' THEN 3 
+                    ELSE 4 
+                END
+        """
+        ).df()
+
+        fig_freq = px.bar(
+            df_freq,
+            x="Faixa de Pedidos",
+            y="Clientes",
+            color_discrete_sequence=["#0e382c"],
+        )
+        fig_freq.update_traces(texttemplate="%{y:,.0f}", textposition="outside")
+        fig_freq.update_layout(
+            xaxis_title="",
+            yaxis_title="Clientes",
+            margin=dict(t=30, b=20, l=10, r=10),
+        )
+        st.plotly_chart(fig_freq, use_container_width=True)
+
+    # Gráfico 2: LTV Médio por Canal de Tráfego
+    with col_ret2:
+        st.markdown("**LTV Médio por Canal de Origem**")
+        df_ltv_canal = con.execute(
+            f"""
+            SELECT 
+                u.traffic_source AS "Canal", 
+                ROUND(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT oi.user_id), 0), 2) AS "LTV" 
+            FROM order_items oi 
+            JOIN users u ON oi.user_id = u.id 
+            {where_complete} 
+            GROUP BY u.traffic_source 
+            ORDER BY LTV DESC
+        """
+        ).df()
+
+        fig_ltv_canal = px.bar(
+            df_ltv_canal,
+            x="LTV",
+            y="Canal",
+            orientation="h",
+            color_discrete_sequence=["#d97724"],
+        )
+        fig_ltv_canal.update_traces(
+            texttemplate="US$ %{x:.2f}", textposition="outside"
+        )
+        fig_ltv_canal.update_layout(
+            yaxis=dict(autorange="reversed"),
+            xaxis_title="LTV Médio (US$)",
+            margin=dict(t=20, b=20, l=10, r=10),
+        )
+        st.plotly_chart(fig_ltv_canal, use_container_width=True)
+        
+    # ==========================================
+    # SEÇÃO 4: PERFIL E SEGMENTAÇÃO DE CLIENTES
+    # ==========================================
+    st.markdown("---")
+    st.subheader("👥 Perfil e Segmentação de Clientes")
+
+    # Cláusula WHERE para a tabela de usuários (respeitando os filtros de origem e país da barra lateral)
+    where_u = []
+    if filtro_origem != "Todas as origens":
+        where_u.append(f"u.traffic_source = '{filtro_origem}'")
+    if filtro_pais != "Todos os locais":
+        where_u.append(f"u.country = '{filtro_pais}'")
+
+    clause_user_where = "WHERE " + " AND ".join(where_u) if where_u else ""
+
+    # --- Cartões de Destaque Demográficos ---
+    col_p1, col_p2, col_p3 = st.columns(3)
+
+    sql_demo_kpi = f"""
+        SELECT 
+            COUNT(DISTINCT u.id) as total_usuarios, 
+            CAST(ROUND(AVG(u.age)) AS INT) as idade_media, 
+            MODE(u.gender) as genero_principal 
+        FROM users u 
+        {clause_user_where}
+    """
+    res_demo = con.execute(sql_demo_kpi).fetchone()
+
+    total_usr = res_demo[0] if res_demo and res_demo[0] else 0
+    idade_med = res_demo[1] if res_demo and res_demo[1] else 0
+    gen_mode = (
+        "Feminino"
+        if (res_demo and res_demo[2] == "F")
+        else ("Masculino" if (res_demo and res_demo[2] == "M") else "N/A")
+    )
+
+    col_p1.metric(
+        "Total de Clientes Cadastrados", f"{total_usr:,}".replace(",", ".")
+    )
+    col_p2.metric("Idade Média do Público", f"{idade_med} anos")
+    col_p3.metric("Gênero Predominante", gen_mode)
+
+    st.markdown("---")
+
+    # --- Gráficos Demográficos ---
+    col_d1, col_d2 = st.columns(2)
+
+    # 1. Faixa Etária
+    with col_d1:
+        st.markdown("**Distribuição por Faixa Etária**")
+        df_age = con.execute(
+            f"""
+            SELECT 
+                CASE 
+                    WHEN u.age < 18 THEN 'Menor que 18' 
+                    WHEN u.age BETWEEN 18 AND 25 THEN '18-25 anos' 
+                    WHEN u.age BETWEEN 26 AND 35 THEN '26-35 anos' 
+                    WHEN u.age BETWEEN 36 AND 50 THEN '36-50 anos' 
+                    WHEN u.age BETWEEN 51 AND 65 THEN '51-65 anos' 
+                    ELSE '65+ anos' 
+                END AS "Faixa Etária", 
+                COUNT(DISTINCT u.id) AS "Clientes" 
+            FROM users u 
+            {clause_user_where} 
+            GROUP BY 1 
+            ORDER BY 
+                CASE "Faixa Etária" 
+                    WHEN 'Menor que 18' THEN 1 
+                    WHEN '18-25 anos' THEN 2 
+                    WHEN '26-35 anos' THEN 3 
+                    WHEN '36-50 anos' THEN 4 
+                    WHEN '51-65 anos' THEN 5 
+                    ELSE 6 
+                END
+        """
+        ).df()
+
+        fig_age = px.bar(
+            df_age,
+            x="Faixa Etária",
+            y="Clientes",
+            color_discrete_sequence=["#1b4d3e"],
+        )
+        fig_age.update_traces(texttemplate="%{y:,.0f}", textposition="outside")
+        fig_age.update_layout(
+            xaxis_title="",
+            yaxis_title="Clientes",
+            margin=dict(t=30, b=20, l=10, r=10),
+        )
+        st.plotly_chart(fig_age, use_container_width=True)
+
+    # 2. Distribuição por Gênero
+    with col_d2:
+        st.markdown("**Proporção de Clientes por Gênero**")
+        df_gender = con.execute(
+            f"""
+            SELECT 
+                CASE u.gender 
+                    WHEN 'F' THEN 'Feminino' 
+                    WHEN 'M' THEN 'Masculino' 
+                    ELSE u.gender 
+                END AS "Gênero", 
+                COUNT(DISTINCT u.id) AS "Clientes" 
+            FROM users u 
+            {clause_user_where} 
+            GROUP BY 1
+        """
+        ).df()
+
+        fig_gender = px.pie(
+            df_gender,
+            names="Gênero",
+            values="Clientes",
+            hole=0.4,
+            color="Gênero",
+            color_discrete_map={"Feminino": "#d97724", "Masculino": "#1b4d3e"},
+        )
+        fig_gender.update_traces(textinfo="percent+label")
+        fig_gender.update_layout(
+            showlegend=False, margin=dict(t=20, b=20, l=10, r=10)
+        )
+        st.plotly_chart(fig_gender, use_container_width=True)
+
+    # 3. Concentração Geográfica
+    st.markdown("**Principais Mercados (Top Países com Mais Clientes)**")
+    df_geo = con.execute(
+        f"""
+        SELECT 
+            u.country AS "País", 
+            COUNT(DISTINCT u.id) AS "Clientes" 
+        FROM users u 
+        {clause_user_where} 
+        GROUP BY 1 
+        ORDER BY Clientes DESC 
+        LIMIT 8
+    """
+    ).df()
+
+    fig_geo = px.bar(
+        df_geo,
+        x="Clientes",
+        y="País",
+        orientation="h",
+        color_discrete_sequence=["#2a7b62"],
+    )
+    fig_geo.update_traces(texttemplate="%{x:,.0f}", textposition="outside")
+    fig_geo.update_layout(
+        yaxis=dict(autorange="reversed"),
+        xaxis_title="Total de Clientes",
+        margin=dict(t=20, b=20, l=10, r=10),
+    )
+    st.plotly_chart(fig_geo, use_container_width=True)

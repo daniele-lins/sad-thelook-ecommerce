@@ -16,7 +16,9 @@ else:
     con = carregar_banco()
     
     # Barra lateral de navegação e logout
-    st.sidebar.title("📌 Menu de Navegação")
+    st.sidebar.title("TheLook SAD")
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("**📌 Menu de Navegação**")
     st.sidebar.write(f"👤 Logado como: **{st.session_state.get('usuario_atual', 'Usuário')}**")
     
     pagina = st.sidebar.radio(
