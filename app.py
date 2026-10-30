@@ -21,19 +21,45 @@ else:
     st.sidebar.subheader("**📌 Menu de Navegação**")
     st.sidebar.write(f"👤 Logado como: **{st.session_state.get('usuario_atual', 'Usuário')}**")
     
-    pagina = st.sidebar.radio(
-        "Ir para:", 
-        ["Dashboard Principal", "Módulo de Simulação", "Central de Relatórios"]
-    )
+    if st.sidebar.button("🚪 Sair / Logout", type="tertiary"):
+            st.session_state['logado'] = False
+            st.rerun()
     
-    if st.sidebar.button("🚪 Sair / Logout"):
-        st.session_state['logado'] = False
+    # Inicialização da página padrão no session_state (caso ainda não exista)
+    if "pagina" not in st.session_state:
+        st.session_state.pagina = "dashboard"
+
+    # Botões de Navegação na Sidebar
+    if st.sidebar.button(
+        "📊 Dashboard Executivo",
+        use_container_width=True,
+        type="primary" if st.session_state.pagina == "dashboard" else "secondary",
+    ):
+        st.session_state.pagina = "dashboard"
         st.rerun()
-    
-    # Renderiza a página selecionada
-    if pagina == "Dashboard Principal":
+
+    if st.sidebar.button(
+        "🔮 Simulador Preditivo",
+        use_container_width=True,
+        type="primary" if st.session_state.pagina == "simulador" else "secondary",
+    ):
+        st.session_state.pagina = "simulador"
+        st.rerun()
+
+    if st.sidebar.button(
+        "📄 Relatório de SAD",
+        use_container_width=True,
+        type="primary" if st.session_state.pagina == "relatorio" else "secondary",
+    ):
+        st.session_state.pagina = "relatorio"
+        st.rerun()
+
+    # 3. Renderização Condicional da Página Selecionada
+    if st.session_state.pagina == "dashboard":
         dashboard.renderizar(con.cursor())
-    elif pagina == "Módulo de Simulação":
-        simulador.renderizar(con.cursor())
-    elif pagina == "Central de Relatórios":
-        relatorios.renderizar(con.cursor())
+    elif st.session_state.pagina == "simulador":
+        st.title("🔮 Simulador Preditivo & Clusterização")
+        st.info("Módulo de Simulação Preditiva / K-Means em desenvolvimento.")
+    elif st.session_state.pagina == "relatorio":
+        st.title("📄 Relatório do Sistema de Apoio à Decisão")
+        st.info("Módulo de Relatórios e Documentação do SAD.")
