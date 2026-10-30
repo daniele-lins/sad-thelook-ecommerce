@@ -3,10 +3,22 @@ import plotly.express as px
 import pandas as pd
 import datetime 
 
+def formata_br(valor, prefixo="", sufixo="", decimais=2):
+    """Formata números no padrão brasileiro: 1.234,56"""
+    if valor is None:
+        return "N/A"
+
+    # 1. Formata no padrão americano inicial (1,234.56)
+    texto = f"{valor:,.{decimais}f}"
+
+    # 2. Inverte os separadores: vírgula vira ponto e ponto vira vírgula
+    texto_br = texto.replace(",", "X").replace(".", ",").replace("X", ".")
+
+    return f"{prefixo}{texto_br}{sufixo}"
 
 def renderizar(con):
     st.title("📊 Dashboard de Performance & Marketing")
-    st.caption("Visão integrada de tráfego, funil de conversão, vendas e retenção")
+    st.caption("Visão integrada de tráfego, funil de conversão, vendas, retenção e segmentação de clientes")
 
     # ==========================================
     # 1. BARRA LATERAL - FILTROS GLOBAIS
@@ -14,60 +26,191 @@ def renderizar(con):
     st.sidebar.markdown("---")
     st.sidebar.subheader("🎯 Filtros Globais")
 
-    # Busca opções dinâmicas extraindo a string r[0] da tupla do fetchall()
+    # --- 1. Filtro de Origem de Tráfego ---
     origens_raw = con.execute(
         "SELECT DISTINCT traffic_source FROM users WHERE traffic_source IS NOT NULL ORDER BY traffic_source"
     ).fetchall()
     origens = ["Todas as origens"] + [r[0] for r in origens_raw]
+    filtro_origem = st.sidebar.selectbox("Origem de tráfego", origens)
 
+    # --- 2. Filtro de Calendário ---
+    min_max_dates = con.execute(
+        "SELECT MIN(TRY_CAST(created_at AS DATE)), MAX(TRY_CAST(created_at AS DATE)) FROM order_items"
+    ).fetchone()
+    data_min = (
+        pd.to_datetime(min_max_dates[0]).date()
+        if (min_max_dates and min_max_dates[0])
+        else datetime.date(2019, 1, 1)
+    )
+    data_max = (
+        pd.to_datetime(min_max_dates[1]).date()
+        if (min_max_dates and min_max_dates[1])
+        else datetime.date(2024, 12, 31)
+    )
+
+    intervalo_datas = st.sidebar.date_input(
+        "Período do Filtro",
+        value=(data_min, data_max),
+        min_value=data_min,
+        max_value=data_max,
+        format="DD/MM/YYYY",
+    )
+
+    # --- 3. Filtros Geográficos (País e Estado) ---
     paises_raw = con.execute(
         "SELECT DISTINCT country FROM users WHERE country IS NOT NULL ORDER BY country"
     ).fetchall()
-    paises = ["Todos os locais"] + [r[0] for r in paises_raw]
+    paises_disponiveis = [r[0] for r in paises_raw]
+    paises_selecionados = st.sidebar.multiselect(
+        "Países", options=paises_disponiveis, placeholder="Todos os países"
+    )
 
-    filtro_origem = st.sidebar.selectbox("Origem de tráfego", origens)
-    
-    # Consulta as menores e maiores datas existentes na base de dados 
-    min_max_dates = con.execute(""" 
-        SELECT 
-            MIN(TRY_CAST(created_at AS DATE)), 
-            MAX(TRY_CAST(created_at AS DATE)) 
-        FROM events 
-    """).fetchone()
-    
-    if min_max_dates and min_max_dates[0] and min_max_dates[1]:
-        data_min = pd.to_datetime(min_max_dates[0]).date() 
-        data_max = pd.to_datetime(min_max_dates[1]).date()
+    if paises_selecionados:
+        placeholders = ", ".join(["?"] * len(paises_selecionados))
+        sql_estados = f"""
+            SELECT DISTINCT state 
+            FROM users 
+            WHERE country IN ({placeholders}) AND state IS NOT NULL 
+            ORDER BY state
+        """
+        estados_raw = con.execute(sql_estados, paises_selecionados).fetchall()
     else:
-        data_min = datetime.date(2019, 1, 1)
-        data_max = datetime.date(2024, 12, 31)
-    
-    # Seletor visual de calendário 
-    intervalo_datas = st.sidebar.date_input( "Período do Filtro", value=(data_min, data_max), min_value=data_min, max_value=data_max, format="DD/MM/YYYY" )
-    
-    filtro_pais = st.sidebar.selectbox("País / Estado", paises)
+        sql_estados = (
+            "SELECT DISTINCT state FROM users WHERE state IS NOT NULL ORDER BY state"
+        )
+        estados_raw = con.execute(sql_estados).fetchall()
 
-    # Cláusulas WHERE dinâmicas
+    estados_disponiveis = [r[0] for r in estados_raw]
+    estados_selecionados = st.sidebar.multiselect(
+        "Estados", options=estados_disponiveis, placeholder="Todos os estados"
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("👤 Filtros Demográficos")
+
+    # --- 4. Filtro de Gênero ---
+    genero_opcoes = {"Todos": None, "Feminino": "F", "Masculino": "M"}
+    filtro_genero_rotulo = st.sidebar.radio(
+        "Gênero do Cliente", list(genero_opcoes.keys()), horizontal=True
+    )
+    filtro_genero = genero_opcoes[filtro_genero_rotulo]
+
+    # --- 5. Filtro de Faixa Etária (Slider) ---
+    idade_min_max = con.execute("SELECT MIN(age), MAX(age) FROM users").fetchone()
+    min_age_bd = (
+        int(idade_min_max[0]) if (idade_min_max and idade_min_max[0]) else 12
+    )
+    max_age_bd = (
+        int(idade_min_max[1]) if (idade_min_max and idade_min_max[1]) else 70
+    )
+
+    faixa_idade = st.sidebar.slider(
+        "Faixa Etária (Anos)",
+        min_value=min_age_bd,
+        max_value=max_age_bd,
+        value=(min_age_bd, max_age_bd),
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📦 Filtros de Produto e Logística")
+
+    # --- 6. Filtro de Categoria ---
+    cats_raw = con.execute(
+        "SELECT DISTINCT category FROM products WHERE category IS NOT NULL ORDER BY category"
+    ).fetchall()
+    cats_disponiveis = [r[0] for r in cats_raw]
+    cats_selecionadas = st.sidebar.multiselect(
+        "Categorias", options=cats_disponiveis, placeholder="Todas as categorias"
+    )
+
+    # --- 7. Filtro de Marca ---
+    marcas_raw = con.execute(
+        "SELECT DISTINCT brand FROM products WHERE brand IS NOT NULL ORDER BY brand"
+    ).fetchall()
+    marcas_disponiveis = [r[0] for r in marcas_raw]
+    marcas_selecionadas = st.sidebar.multiselect(
+        "Marcas", options=marcas_disponiveis, placeholder="Todas as marcas"
+    )
+
+    # --- 8. Filtro de Centro de Distribuição ---
+    cds_raw = con.execute(
+        "SELECT id, name FROM distribution_centers ORDER BY name"
+    ).fetchall()
+    cds_dict = {r[1]: r[0] for r in cds_raw}  # Mapeia Nome do CD -> ID do CD
+    cds_selecionados = st.sidebar.multiselect(
+        "Centro de Distribuição",
+        options=list(cds_dict.keys()),
+        placeholder="Todos os CDs",
+    )
+
+    # ==========================================
+    # 2. MONTAGEM DAS CLÁUSULAS WHERE
+    # ==========================================
     where_events = []
     where_orders = []
+    where_u = []
 
     # 1. Filtro de Origem
     if filtro_origem != "Todas as origens":
-        where_events.append(f"e.traffic_source = '{filtro_origem}'")
+        where_events.append(f"u.traffic_source = '{filtro_origem}'")
         where_orders.append(f"u.traffic_source = '{filtro_origem}'")
+        where_u.append(f"u.traffic_source = '{filtro_origem}'")
 
-    # 2. Filtro de País
-    if filtro_pais != "Todos os locais":
-        where_events.append(f"u.country = '{filtro_pais}'")
-        where_orders.append(f"u.country = '{filtro_pais}'")
+    # 2. Filtro de Calendário
+    if isinstance(intervalo_datas, (list, tuple)) and len(intervalo_datas) == 2:
+        dt_inicio, dt_fim = intervalo_datas
+        where_events.append(
+            f"TRY_CAST(e.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}'"
+        )
+        where_orders.append(
+            f"TRY_CAST(oi.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}'"
+        )
 
-    # 3. Filtro de Calendário (Garante que início e fim foram selecionados) 
-    if isinstance(intervalo_datas, (list, tuple)) and len(intervalo_datas) == 2: 
-        dt_inicio, dt_fim = intervalo_datas 
-        where_events.append(f"TRY_CAST(e.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}'") 
-        where_orders.append(f"TRY_CAST(oi.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}'")
+    # 3. Filtros Geográficos
+    if paises_selecionados:
+        paises_limpos = [p.replace("'", "''") for p in paises_selecionados]
+        paises_fmt = ", ".join([f"'{p}'" for p in paises_limpos])
+        where_events.append(f"u.country IN ({paises_fmt})")
+        where_orders.append(f"u.country IN ({paises_fmt})")
+        where_u.append(f"u.country IN ({paises_fmt})")
 
-    # Monta as strings de cláusula WHERE
+    if estados_selecionados:
+        estados_limpos = [e.replace("'", "''") for e in estados_selecionados]
+        estados_fmt = ", ".join([f"'{e}'" for e in estados_limpos])
+        where_events.append(f"u.state IN ({estados_fmt})")
+        where_orders.append(f"u.state IN ({estados_fmt})")
+        where_u.append(f"u.state IN ({estados_fmt})")
+
+    # 4. Filtros Demográficos (Gênero e Idade)
+    if filtro_genero:
+        where_events.append(f"u.gender = '{filtro_genero}'")
+        where_orders.append(f"u.gender = '{filtro_genero}'")
+        where_u.append(f"u.gender = '{filtro_genero}'")
+
+    # Correção do acesso às posições [0] e [1] da tupla
+    if faixa_idade and (faixa_idade[0] > min_age_bd or faixa_idade[1] < max_age_bd):
+        idade_min, idade_max = faixa_idade[0], faixa_idade[1]
+        where_events.append(f"u.age BETWEEN {idade_min} AND {idade_max}")
+        where_orders.append(f"u.age BETWEEN {idade_min} AND {idade_max}")
+        where_u.append(f"u.age BETWEEN {idade_min} AND {idade_max}")
+
+    # 5. Filtros Exclusivos de Produto / Estoque (APENAS na tabela de pedidos order_items)
+    if cats_selecionadas:
+        cats_limpas = [c.replace("'", "''") for c in cats_selecionadas]
+        cats_fmt = ", ".join([f"'{c}'" for c in cats_limpas])
+        where_orders.append(f"p.category IN ({cats_fmt})")
+
+    if marcas_selecionadas:
+        marcas_limpas = [m.replace("'", "''") for m in marcas_selecionadas]
+        marcas_fmt = ", ".join([f"'{m}'" for m in marcas_limpas])
+        where_orders.append(f"p.brand IN ({marcas_fmt})")
+
+    if cds_selecionados:
+        ids_cds = [str(cds_dict[nome]) for nome in cds_selecionados]
+        ids_fmt = ", ".join(ids_cds)
+        where_orders.append(f"p.distribution_center_id IN ({ids_fmt})")
+
+    # Unificação das Cláusulas SQL
     clause_ev = "WHERE " + " AND ".join(where_events) if where_events else ""
     clause_ord = "WHERE " + " AND ".join(where_orders) if where_orders else ""
     where_complete = (
@@ -75,6 +218,7 @@ def renderizar(con):
         if clause_ord
         else "WHERE oi.status = 'Complete'"
     )
+    clause_user_where = "WHERE " + " AND ".join(where_u) if where_u else ""
 
     # ==========================================
     # SEÇÃO 1: TRÁFEGO E FUNIL DE NAVEGAÇÃO
@@ -120,12 +264,9 @@ def renderizar(con):
         ((q_carrinho - q_compras) / q_carrinho * 100) if q_carrinho > 0 else 0
     )
 
-    col_bn1.metric(
-        "Sessões Únicas",
-        f"{q_sessoes/1000:.1f} mil" if q_sessoes >= 1000 else f"{q_sessoes}",
-    )
-    col_bn2.metric("Conversão Global", f"{tx_conversao:.2f}%")
-    col_bn3.metric("Abandono de Carrinho", f"{tx_abandono:.2f}%")
+    col_bn1.metric("Sessões Únicas", formata_br(q_sessoes, decimais=0))
+    col_bn2.metric("Conversão Global", formata_br(tx_conversao, sufixo="%", decimais=2))
+    col_bn3.metric("Abandono de Carrinho", formata_br(tx_abandono, sufixo="%", decimais=2))
 
     st.markdown("---")
     
@@ -175,7 +316,8 @@ def renderizar(con):
             autorange="reversed"
         )
         fig_funnel.update_xaxes(visible=True, showticklabels=False, title_text="Quantidade de Sessões")
-        fig_funnel.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False)
+        fig_funnel.update_traces(texttemplate="%{x:,.0f}")
+        fig_funnel.update_layout(margin=dict(l=20, r=20, t=20, b=20), showlegend=False, separators=",.")
         st.plotly_chart(fig_funnel, use_container_width=True)
 
     with col_f2:
@@ -202,6 +344,7 @@ def renderizar(con):
             yaxis_title="Taxa de Conversão (%)",
             xaxis_title="",
             margin=dict(t=30, b=20, l=10, r=10),
+            separators=",."
         )
         st.plotly_chart(fig_conv, use_container_width=True)
 
@@ -232,15 +375,9 @@ def renderizar(con):
 
     aov = receita / pedidos
 
-    c_f1.metric(
-        "Receita Total",
-        f"US$ {receita/1e6:.2f} mi" if receita >= 1e6 else f"US$ {receita:,.2f}",
-    )
-    c_f2.metric(
-        "Lucro Bruto",
-        f"US$ {lucro/1e6:.2f} mi" if lucro >= 1e6 else f"US$ {lucro:,.2f}",
-    )
-    c_f3.metric("Ticket Médio (AOV)", f"US$ {aov:.2f}")
+    c_f1.metric("Receita Total", formata_br(receita, prefixo="US$ ", decimais=2))
+    c_f2.metric("Lucro Bruto", formata_br(lucro, prefixo="US$ ", decimais=2))
+    c_f3.metric("Ticket Médio (AOV)", formata_br(aov, prefixo="US$ ", decimais=2))
 
     st.markdown("---")
 
@@ -269,11 +406,13 @@ def renderizar(con):
             color_discrete_sequence=["#0e382c", "#d97724"],
             labels={"value": "Valor (US$)", "variable": "Métrica"} # Mapeia os nomes padrão
         )
+        fig_canal.update_traces(texttemplate="US$ %{y:.2s}", textposition="outside", cliponaxis=False)
         fig_canal.update_layout( 
             yaxis_title="Valor (US$)",
             xaxis_title="",
             legend_title_text="Métrica", # Ou use "" se quiser remover o título da legenda totalmente 
-            margin=dict(t=30, b=20, l=10, r=10) 
+            margin=dict(t=50, b=20, l=10, r=10) ,
+            separators=",."
         )
         st.plotly_chart(fig_canal, use_container_width=True)
 
@@ -286,6 +425,7 @@ def renderizar(con):
                 u.traffic_source as Canal, 
                 SUM(oi.sale_price) as Receita 
             FROM order_items oi 
+            JOIN products p ON oi.product_id = p.id 
             JOIN users u ON oi.user_id = u.id 
             {where_complete} 
             GROUP BY "Mês", u.traffic_source 
@@ -305,28 +445,28 @@ def renderizar(con):
             f"""
             SELECT 
                 p.category as Categoria, 
-                SUM(oi.sale_price) as Vendas 
+                SUM(oi.sale_price) as Receita 
             FROM order_items oi 
             JOIN products p ON oi.product_id = p.id 
             JOIN users u ON oi.user_id = u.id 
             {where_complete} 
             GROUP BY p.category 
-            ORDER BY Vendas DESC 
+            ORDER BY Receita DESC 
             LIMIT 5
         """
         ).df()
         fig_cat = px.bar(
             df_cat,
-            x="Vendas",
+            x="Receita",
             y="Categoria",
             orientation="h",
             color_discrete_sequence=["#1b4d3e"],
         )
         fig_cat.update_traces(
-            texttemplate="US$ %{x:,.0f}", textposition="outside"
+            texttemplate="US$ %{x:,.0f}", textposition="outside", cliponaxis=False
         )
         fig_cat.update_layout(
-            yaxis=dict(autorange="reversed"), xaxis_title="Vendas (US$)"
+            yaxis=dict(autorange="reversed"), xaxis_title="Receita (US$)", margin=dict(t=20, b=20, l=10, r=80), separators=",."
         )
         st.plotly_chart(fig_cat, use_container_width=True)
 
@@ -335,28 +475,28 @@ def renderizar(con):
             f"""
             SELECT 
                 p.brand as Marca, 
-                SUM(oi.sale_price) as Vendas 
+                SUM(oi.sale_price) as Receita 
             FROM order_items oi 
             JOIN products p ON oi.product_id = p.id 
             JOIN users u ON oi.user_id = u.id 
             {where_complete} 
             GROUP BY p.brand 
-            ORDER BY Vendas DESC 
+            ORDER BY Receita DESC 
             LIMIT 5
         """
         ).df()
         fig_brand = px.bar(
             df_brand,
-            x="Vendas",
+            x="Receita",
             y="Marca",
             orientation="h",
             color_discrete_sequence=["#2a7b62"],
         )
         fig_brand.update_traces(
-            texttemplate="US$ %{x:,.0f}", textposition="outside"
+            texttemplate="US$ %{x:,.0f}", textposition="outside", cliponaxis=False
         )
         fig_brand.update_layout(
-            yaxis=dict(autorange="reversed"), xaxis_title="Vendas (US$)"
+            yaxis=dict(autorange="reversed"), xaxis_title="Receita (US$)", margin=dict(t=20, b=20, l=10, r=80), separators=",."
         )
         st.plotly_chart(fig_brand, use_container_width=True)
     
@@ -373,6 +513,7 @@ def renderizar(con):
         SELECT 
             COALESCE(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT oi.user_id), 0), 0) 
         FROM order_items oi 
+        JOIN products p ON oi.product_id = p.id 
         JOIN users u ON oi.user_id = u.id 
         {where_complete}
     """
@@ -383,7 +524,8 @@ def renderizar(con):
             SELECT 
                 oi.user_id, 
                 COUNT(DISTINCT oi.order_id) as qtd 
-            FROM order_items oi 
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.id 
             JOIN users u ON oi.user_id = u.id
             {where_complete} 
             GROUP BY oi.user_id 
@@ -394,8 +536,8 @@ def renderizar(con):
     """
     tx_recompra = con.execute(sql_recompra).fetchone()[0] or 0.0
 
-    c_r1.metric("LTV Médio por Cliente", f"US$ {ltv:.2f}")
-    c_r2.metric("Taxa de Recompra (Fidelidade)", f"{tx_recompra:.1f}%")
+    c_r1.metric("LTV Médio por Cliente", formata_br(ltv, prefixo="US$ ", decimais=2))
+    c_r2.metric("Taxa de Recompra (Fidelidade)", formata_br(tx_recompra, sufixo="%", decimais=2))
 
     st.markdown("---")
 
@@ -411,7 +553,8 @@ def renderizar(con):
                 SELECT 
                     oi.user_id, 
                     COUNT(DISTINCT oi.order_id) as total_pedidos 
-                FROM order_items oi 
+                FROM order_items oi
+                JOIN products p ON oi.product_id = p.id  
                 JOIN users u ON oi.user_id = u.id 
                 {where_complete} 
                 GROUP BY oi.user_id 
@@ -447,18 +590,21 @@ def renderizar(con):
             xaxis_title="",
             yaxis_title="Clientes",
             margin=dict(t=30, b=20, l=10, r=10),
+            separators=",."
         )
         st.plotly_chart(fig_freq, use_container_width=True)
 
     # Gráfico 2: LTV Médio por Canal de Tráfego
     with col_ret2:
         st.markdown("**LTV Médio por Canal de Origem**")
+        
         df_ltv_canal = con.execute(
             f"""
             SELECT 
                 u.traffic_source AS "Canal", 
                 ROUND(SUM(oi.sale_price) / NULLIF(COUNT(DISTINCT oi.user_id), 0), 2) AS "LTV" 
             FROM order_items oi 
+            JOIN products p ON oi.product_id = p.id 
             JOIN users u ON oi.user_id = u.id 
             {where_complete} 
             GROUP BY u.traffic_source 
@@ -473,14 +619,22 @@ def renderizar(con):
             orientation="h",
             color_discrete_sequence=["#d97724"],
         )
+
+        # 1. Adicionado cliponaxis=False para impedir que o rótulo seja cortado
         fig_ltv_canal.update_traces(
-            texttemplate="US$ %{x:.2f}", textposition="outside"
+            texttemplate="US$ %{x:.2f}",
+            textposition="outside",
+            cliponaxis=False,
         )
+
+        # 2. Aumentada a margem direita (r=80) para dar folga ao texto na tela
         fig_ltv_canal.update_layout(
             yaxis=dict(autorange="reversed"),
             xaxis_title="LTV Médio (US$)",
-            margin=dict(t=20, b=20, l=10, r=10),
+            margin=dict(t=20, b=20, l=10, r=80),
+            separators=",."
         )
+
         st.plotly_chart(fig_ltv_canal, use_container_width=True)
         
     # ==========================================
@@ -489,40 +643,37 @@ def renderizar(con):
     st.markdown("---")
     st.subheader("👥 Perfil e Segmentação de Clientes")
 
-    # Cláusula WHERE para a tabela de usuários (respeitando os filtros de origem e país da barra lateral)
-    where_u = []
-    if filtro_origem != "Todas as origens":
-        where_u.append(f"u.traffic_source = '{filtro_origem}'")
-    if filtro_pais != "Todos os locais":
-        where_u.append(f"u.country = '{filtro_pais}'")
-
-    clause_user_where = "WHERE " + " AND ".join(where_u) if where_u else ""
-
-    # --- Cartões de Destaque Demográficos ---
+   # --- Cartões de Destaque Demográficos Corrigidos ---
     col_p1, col_p2, col_p3 = st.columns(3)
 
     sql_demo_kpi = f"""
         SELECT 
             COUNT(DISTINCT u.id) as total_usuarios, 
-            CAST(ROUND(AVG(u.age)) AS INT) as idade_media, 
-            MODE(u.gender) as genero_principal 
+            ROUND(AVG(u.age), 1) as idade_media, 
+            COUNT(DISTINCT CASE WHEN u.gender = 'F' THEN u.id END) as total_f, 
+            COUNT(DISTINCT CASE WHEN u.gender = 'M' THEN u.id END) as total_m 
         FROM users u 
-        {clause_user_where}
+        JOIN order_items oi ON u.id = oi.user_id 
+        JOIN products p ON oi.product_id = p.id 
+        {where_complete}
     """
     res_demo = con.execute(sql_demo_kpi).fetchone()
 
-    total_usr = res_demo[0] if res_demo and res_demo[0] else 0
-    idade_med = res_demo[1] if res_demo and res_demo[1] else 0
-    gen_mode = (
-        "Feminino"
-        if (res_demo and res_demo[2] == "F")
-        else ("Masculino" if (res_demo and res_demo[2] == "M") else "N/A")
-    )
+    total_usr = res_demo[0] if (res_demo and res_demo[0]) else 0
+    idade_med = res_demo[1] if (res_demo and res_demo[1]) else 0.0
+    total_f = res_demo[2] if (res_demo and res_demo[2]) else 0
+    total_m = res_demo[3] if (res_demo and res_demo[3]) else 0
 
-    col_p1.metric(
-        "Total de Clientes Cadastrados", f"{total_usr:,}".replace(",", ".")
-    )
-    col_p2.metric("Idade Média do Público", f"{idade_med} anos")
+    # Lógica de decisão baseada em clientes únicos
+    if total_f > total_m:
+        gen_mode = "Feminino"
+    elif total_m > total_f:
+        gen_mode = "Masculino"
+    else:
+        gen_mode = "Empate"
+
+    col_p1.metric("Total de Clientes", formata_br(total_usr, decimais=0))
+    col_p2.metric("Idade Média do Público", f"{formata_br(idade_med, decimais=1)} anos")
     col_p3.metric("Gênero Predominante", gen_mode)
 
     st.markdown("---")
@@ -545,8 +696,10 @@ def renderizar(con):
                     ELSE '65+ anos' 
                 END AS "Faixa Etária", 
                 COUNT(DISTINCT u.id) AS "Clientes" 
-            FROM users u 
-            {clause_user_where} 
+            FROM users u
+            JOIN order_items oi ON oi.user_id = u.id
+            JOIN products p ON oi.product_id = p.id
+            {where_complete} 
             GROUP BY 1 
             ORDER BY 
                 CASE "Faixa Etária" 
@@ -571,6 +724,7 @@ def renderizar(con):
             xaxis_title="",
             yaxis_title="Clientes",
             margin=dict(t=30, b=20, l=10, r=10),
+            separators=",."
         )
         st.plotly_chart(fig_age, use_container_width=True)
 
@@ -586,8 +740,10 @@ def renderizar(con):
                     ELSE u.gender 
                 END AS "Gênero", 
                 COUNT(DISTINCT u.id) AS "Clientes" 
-            FROM users u 
-            {clause_user_where} 
+            FROM users u
+            JOIN order_items oi ON oi.user_id = u.id
+            JOIN products p ON oi.product_id = p.id
+            {where_complete} 
             GROUP BY 1
         """
         ).df()
@@ -602,7 +758,7 @@ def renderizar(con):
         )
         fig_gender.update_traces(textinfo="percent+label")
         fig_gender.update_layout(
-            showlegend=False, margin=dict(t=20, b=20, l=10, r=10)
+            showlegend=False, margin=dict(t=20, b=20, l=10, r=10), separators=",."
         )
         st.plotly_chart(fig_gender, use_container_width=True)
 
@@ -613,8 +769,10 @@ def renderizar(con):
         SELECT 
             u.country AS "País", 
             COUNT(DISTINCT u.id) AS "Clientes" 
-        FROM users u 
-        {clause_user_where} 
+        FROM users u
+        JOIN order_items oi ON oi.user_id = u.id
+        JOIN products p ON oi.product_id = p.id
+        {where_complete} 
         GROUP BY 1 
         ORDER BY Clientes DESC 
         LIMIT 8
@@ -633,5 +791,6 @@ def renderizar(con):
         yaxis=dict(autorange="reversed"),
         xaxis_title="Total de Clientes",
         margin=dict(t=20, b=20, l=10, r=10),
+        separators=",."
     )
     st.plotly_chart(fig_geo, use_container_width=True)

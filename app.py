@@ -32,8 +32,8 @@ else:
     
     # Renderiza a página selecionada
     if pagina == "Dashboard Principal":
-        dashboard.renderizar(con)
+        dashboard.renderizar(con.cursor())
     elif pagina == "Módulo de Simulação":
-        simulador.renderizar(con)
+        simulador.renderizar(con.cursor())
     elif pagina == "Central de Relatórios":
-        relatorios.renderizar(con)
+        relatorios.renderizar(con.cursor())
