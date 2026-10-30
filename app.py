@@ -2,7 +2,7 @@ import streamlit as st
 from views import login, dashboard, simulador, relatorios
 from base_de_dados import carregar_banco
 
-st.set_page_config(page_title="SAD E-commerce", layout="wide")
+st.set_page_config(page_title="TheLook E-commerce - Sistema de Apoio à Decisão de Marketing", layout="wide")
 
 # Inicializa o estado de login
 if 'logado' not in st.session_state:
