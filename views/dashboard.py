@@ -113,6 +113,8 @@ def renderizar(con):
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📦 Filtros de Produto e Logística")
+    # escrever observação embaixo do subheader bem pequenininho
+    st.sidebar.caption("(Não altera dados de tráfego e funil)")
 
     # --- 6. Filtro de Categoria ---
     cats_raw = con.execute(
@@ -218,7 +220,6 @@ def renderizar(con):
         if clause_ord
         else "WHERE oi.status = 'Complete'"
     )
-    clause_user_where = "WHERE " + " AND ".join(where_u) if where_u else ""
 
     # ==========================================
     # SEÇÃO 1: TRÁFEGO E FUNIL DE NAVEGAÇÃO
@@ -331,6 +332,7 @@ def renderizar(con):
             LEFT JOIN users u ON e.user_id = u.id 
             {clause_ev} 
             GROUP BY 1
+            ORDER BY 1
         """
         ).df()
         fig_conv = px.bar(
