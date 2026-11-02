@@ -1,5 +1,5 @@
 import streamlit as st
-from views import login, dashboard, simulador, relatorios
+from pages import login, dashboard, simulador, relatorios
 from base_de_dados import carregar_banco
 
 st.set_page_config(page_title="TheLook E-commerce - Sistema de Apoio à Decisão de Marketing", layout="wide")
@@ -31,7 +31,7 @@ else:
 
     # Botões de Navegação na Sidebar
     if st.sidebar.button(
-        "📊 Dashboard Executivo",
+        "📊 Dashboard",
         use_container_width=True,
         type="primary" if st.session_state.pagina == "dashboard" else "secondary",
     ):
@@ -39,7 +39,7 @@ else:
         st.rerun()
 
     if st.sidebar.button(
-        "🔮 Simulador Preditivo",
+        "🔮 Módulo de Simulação",
         use_container_width=True,
         type="primary" if st.session_state.pagina == "simulador" else "secondary",
     ):
@@ -47,7 +47,7 @@ else:
         st.rerun()
 
     if st.sidebar.button(
-        "📄 Relatório de SAD",
+        "📄 Relatórios",
         use_container_width=True,
         type="primary" if st.session_state.pagina == "relatorio" else "secondary",
     ):
@@ -57,9 +57,8 @@ else:
     # 3. Renderização Condicional da Página Selecionada
     if st.session_state.pagina == "dashboard":
         dashboard.renderizar(con.cursor())
-    elif st.session_state.pagina == "simulador":
-        st.title("🔮 Simulador Preditivo & Clusterização")
-        st.info("Módulo de Simulação Preditiva / K-Means em desenvolvimento.")
+    elif st.session_state.pagina == "simulador": 
+        simulador.renderizar(con.cursor())
     elif st.session_state.pagina == "relatorio":
-        st.title("📄 Relatório do Sistema de Apoio à Decisão")
+        st.title("📄 Relatórios do Sistema de Apoio à Decisão")
         st.info("Módulo de Relatórios e Documentação do SAD.")
