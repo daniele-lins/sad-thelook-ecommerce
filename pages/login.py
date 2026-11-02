@@ -11,8 +11,8 @@ def renderizar():
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
-        st.title("🔐 Acesso ao SAD E-commerce")
-        st.subheader("Sistema de Apoio à Decisão de Marketing")
+        st.title("🔐 Acesso ao TheLook SAD")
+        st.subheader("Sistema de Apoio à Decisão de Marketing para o TheLook")
         st.write("Digite suas credenciais para acessar o painel.")
         
         with st.form("form_login"):
