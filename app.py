@@ -1,5 +1,5 @@
 import streamlit as st
-from pages import login, dashboard, simulador, relatorios
+from telas import login, dashboard, simulador, relatorios
 from base_de_dados import carregar_banco
 
 st.set_page_config(page_title="TheLook E-commerce - Sistema de Apoio à Decisão de Marketing", layout="wide")
