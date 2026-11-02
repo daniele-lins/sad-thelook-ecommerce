@@ -306,7 +306,7 @@ def renderizar(con):
         st.subheader("🛠️ Parâmetros da Simulação")
         segmento_alvo = st.selectbox("Escolha o Segmento Alvo:", opcoes_segmento)
         pct_conversao = st.slider(
-            "Taxa de Recompra/Resposta Esperada (%)",
+            "Taxa de Recompra Esperada (%)",
             min_value=1.0,
             max_value=50.0,
             value=15.0,
@@ -314,7 +314,7 @@ def renderizar(con):
             help="Percentual de clientes do segmento que responderão positivamente à oferta.",
         )
         pct_desconto = st.slider(
-            "Desconto / Incentivo Promocional (%)",
+            "Desconto Promocional (%)",
             min_value=0.0,
             max_value=30.0,
             value=10.0,
