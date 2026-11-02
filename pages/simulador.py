@@ -295,7 +295,7 @@ def renderizar(con):
     st.markdown("### 🎯 2. Simulador Preditivo de Campanhas de Marketing")
     st.markdown(
         """
-        Configure as **alavancas de decisão** para simular o retorno financeiro e a viabilidade econômica de uma ação comercial direcionada a um segmento específico.
+        Configure as **alavancas de decisão** para simular o retorno financeiro aproximado e a viabilidade econômica de uma ação comercial direcionada a um segmento específico.
         """
     )
 
@@ -306,7 +306,7 @@ def renderizar(con):
         st.subheader("🛠️ Parâmetros da Simulação")
         segmento_alvo = st.selectbox("Escolha o Segmento Alvo:", opcoes_segmento)
         pct_conversao = st.slider(
-            "Taxa de Conversão Esperada (%)",
+            "Taxa de Recompra/Resposta Esperada (%)",
             min_value=1.0,
             max_value=50.0,
             value=15.0,
@@ -365,7 +365,7 @@ def renderizar(con):
         else:
             st.error(
                 f"""
-                **Cenário Inviável (Déficit Financeiro)!** O desconto concedido (**{pct_desconto}%**) somado ao custo fixo de **US$ {formata_br(custo_fixo)}** consome toda a margem de contribuição gerada pelas vendas. **Ação Recomendada:** Reduza a taxa de desconto concedida ou aumente a meta de taxa de conversão esperada para reequilibrar o cenário.
+                **Cenário Inviável (Déficit Financeiro)!** O desconto concedido (**{pct_desconto}%**) somado ao custo fixo de **US$ {formata_br(custo_fixo)}** consome toda a margem de contribuição gerada pelas vendas. **Ação Recomendada:** Reduza a taxa de desconto concedida ou aumente a meta de taxa de recompra esperada para reequilibrar o cenário.
                 """
             )
 
@@ -374,7 +374,7 @@ def renderizar(con):
         st.subheader(f"📈 Resultado Projetado para: {segmento_alvo}")
         col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
         col_kpi1.metric(
-            "Clientes Convertidos", formata_br(clientes_impactados, decimais=0)
+            "Clientes Impactados", formata_br(clientes_impactados, decimais=0)
         )
         col_kpi2.metric(
             "Receita Bruta Incremental",
