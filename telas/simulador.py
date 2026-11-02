@@ -48,8 +48,63 @@ def carregar_dados_rfm(_con):
     return df
 
 
+@st.cache_data(ttl=600)
+def carregar_regras_associacao(_con, user_ids_tuple=None):
+    """Calcula as regras de associação (Market Basket Analysis) entre categorias de produtos para cross-selling."""
+    where_clause = "WHERE oi.status = 'Complete'"
+    if user_ids_tuple:
+        user_ids_str = ",".join(map(str, user_ids_tuple))
+        where_clause += f" AND oi.user_id IN ({user_ids_str})"
+
+    query = f"""
+        WITH pedidos_cat AS (
+            SELECT DISTINCT oi.order_id, p.category 
+            FROM order_items oi
+            JOIN products p ON oi.product_id = p.id
+            {where_clause}
+        ),
+        total_orders AS (
+            SELECT COUNT(DISTINCT order_id) as n_total FROM pedidos_cat
+        ),
+        freq_individual AS (
+            SELECT category, COUNT(DISTINCT order_id) as n_cat 
+            FROM pedidos_cat 
+            GROUP BY category
+        ),
+        pares AS (
+            SELECT 
+                p1.category AS cat_a, 
+                p2.category AS cat_b, 
+                COUNT(DISTINCT p1.order_id) AS n_juntos 
+            FROM pedidos_cat p1 
+            JOIN pedidos_cat p2 ON p1.order_id = p2.order_id AND p1.category < p2.category 
+            GROUP BY p1.category, p2.category
+        )
+        SELECT 
+            pr.cat_a AS "Categoria Base",
+            pr.cat_b AS "Categoria Recomendada (Cross-Sell)",
+            pr.n_juntos AS "Pedidos Conjuntos",
+            ROUND((pr.n_juntos * 1.0 / fa.n_cat) * 100, 1) AS "Confiança (%)",
+            ROUND((pr.n_juntos * 1.0 * t.n_total) / (fa.n_cat * fb.n_cat + 1e-5), 2) AS "Lift"
+        FROM pares pr
+        JOIN freq_individual fa ON pr.cat_a = fa.category
+        JOIN freq_individual fb ON pr.cat_b = fb.category
+        CROSS JOIN total_orders t
+        WHERE pr.n_juntos >= 2
+        ORDER BY "Lift" DESC, "Confiança (%)" DESC
+        LIMIT 5
+    """
+    try:
+        df_regras = _con.execute(query).df()
+        if df_regras.empty and user_ids_tuple is not None:
+            return carregar_regras_associacao(_con, user_ids_tuple=None)
+        return df_regras
+    except Exception:
+        return pd.DataFrame()
+
+
 def aplicar_kmeans(df_rfm, n_clusters=4):
-    """Aplica K-Means com k=4 e rotula os clusters dinamicamente por perfil estatístico alinhado à literatura de segmentação RFM (Fader et al., 2005)."""
+    """Aplica K-Means com k=4 e rotula os clusters dinamicamente por perfil estatístico alinhado à literatura de segmentação RFM."""
     df = df_rfm.copy()
     X = df[["recencia", "frequencia", "valor_monetario"]]
 
@@ -59,7 +114,6 @@ def aplicar_kmeans(df_rfm, n_clusters=4):
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     df["cluster_id"] = kmeans.fit_predict(X_scaled)
 
-    # Mapeamento de perfis estatísticos dos centroides
     perfil = (
         df.groupby("cluster_id")
         .agg(
@@ -106,7 +160,7 @@ def renderizar(con):
     st.header("🔮 Módulo de Simulação Preditiva & Clusterização de Clientes")
     st.markdown(
         """
-        Este módulo utiliza o algoritmo de **Clusterização K-Means (k=4)** baseado no modelo **RFM (Recência, Frequência e Valor Monetário)** para segmentar a base de clientes e fornecer um **Simulador Preditivo de Marketing (Cenários "What-If")**.
+        Este módulo combina **Clusterização K-Means (k=4)** baseada no modelo **RFM**, **Mineração de Regras de Associação (Market Basket Analysis)** e um **Simulador Preditivo "What-If"** para orientar ações de marketing e campanhas de recompra.
         """
     )
 
@@ -119,12 +173,12 @@ def renderizar(con):
 
     # Aplicação do K-Means com k=4 fixo
     df_clustered = aplicar_kmeans(df_rfm, n_clusters=4)
-    
+
     cores_clusters = {
         "💰 Clientes de Alto-Valor": "#F2B701",
         "💤 Clientes Inativos": "#3969AC",
         "💜 Clientes Leais": "#7F3C8D",
-        "🌱 Clientes Promissores": "#11A579"
+        "🌱 Clientes Promissores": "#11A579",
     }
 
     # ====================================================
@@ -157,9 +211,7 @@ def renderizar(con):
             with cols[idx]:
                 st.metric(
                     label=row["cluster_nome"],
-                    value=f"{int(row['Total_Clientes']):,}".replace(
-                        ",", "."
-                    )
+                    value=f"{int(row['Total_Clientes']):,}".replace(",", "."),
                 )
 
     # --- PAINEL TRIPLO DE GRÁFICOS (R, F, M) ---
@@ -240,21 +292,19 @@ def renderizar(con):
             values="Valor_Total",
             hole=0.4,
             color="cluster_nome",
-            color_discrete_map=cores_clusters
+            color_discrete_map=cores_clusters,
         )
         fig_pie.update_traces(textinfo="percent+label", textposition="inside")
         fig_pie.update_layout(
             height=260,
             separators=",.",
             showlegend=False,
-            margin=dict(t=10, b=10, l=10, r=10)
+            margin=dict(t=10, b=10, l=10, r=10),
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
     with col_tab:
         st.markdown("**📋 Comparativo Detalhado por Segmento**")
-
-        # 1. Copia e formata os dados
         df_trans = resumo_clusters.copy()
         df_trans["Total de Clientes"] = df_trans["Total_Clientes"].apply(
             lambda x: formata_br(x, decimais=0)
@@ -262,9 +312,9 @@ def renderizar(con):
         df_trans["Recência Média (Dias)"] = df_trans["Recencia_Media"].apply(
             lambda x: formata_br(x, decimais=1)
         )
-        df_trans["Frequência Média (Pedidos)"] = df_trans["Frequencia_Media"].apply(
-            lambda x: formata_br(x, decimais=2)
-        )
+        df_trans["Frequência Média (Pedidos)"] = df_trans[
+            "Frequencia_Media"
+        ].apply(lambda x: formata_br(x, decimais=2))
         df_trans["Ticket Médio"] = df_trans["Ticket_Medio"].apply(
             lambda x: formata_br(x, prefixo="US$ ")
         )
@@ -275,7 +325,6 @@ def renderizar(con):
             lambda x: formata_br(x, prefixo="US$ ")
         )
 
-        # 2. Transpõe a tabela para colocar cada Cluster em uma Coluna
         tabela_final = df_trans.set_index("cluster_nome")[
             [
                 "Total de Clientes",
@@ -286,6 +335,7 @@ def renderizar(con):
                 "Lucro Total",
             ]
         ].T
+
         st.dataframe(tabela_final, use_container_width=True)
 
     # ====================================================
@@ -352,7 +402,7 @@ def renderizar(con):
         else 0.0
     )
 
-    # --- ORIENTAÇÃO NA COLUNA ESQUERDA (Preenche o espaço em branco) ---
+    # --- ORIENTAÇÃO NA COLUNA ESQUERDA ---
     with col_sim1:
         st.markdown("---")
         st.markdown("#### 💡 Orientação para Tomada de Decisão")
@@ -372,6 +422,7 @@ def renderizar(con):
     # --- RESULTADOS NA COLUNA DIREITA ---
     with col_sim2:
         st.subheader(f"📈 Resultado Projetado para: {segmento_alvo}")
+
         col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
         col_kpi1.metric(
             "Clientes Impactados", formata_br(clientes_impactados, decimais=0)
@@ -388,7 +439,7 @@ def renderizar(con):
         col_kpi4, col_kpi5 = st.columns(2)
         col_kpi4.metric(
             "Lucro Líquido Incremental",
-            formata_br(lucro_liquido_proj, prefixo="US$ ")
+            formata_br(lucro_liquido_proj, prefixo="US$ "),
         )
         col_kpi5.metric(
             "Retorno s/ Investimento (ROI)",
@@ -428,3 +479,39 @@ def renderizar(con):
             margin=dict(t=40, b=20, l=10, r=10),
         )
         st.plotly_chart(fig_sim, use_container_width=True)
+
+    # ====================================================
+    # SEÇÃO 3: RECOMENDAÇÃO DE CROSS-SELLING (ASSOCIAÇÃO)
+    # ====================================================
+    st.markdown("---")
+    st.markdown("### 🛍️ 3. Recomendação de Cross-Selling por Regras de Associação")
+    st.markdown(
+        f"""
+        Análise de **Cesta de Compras (Market Basket Analysis)**. Identifica quais categorias possuem maior probabilidade de compra conjunta pelos clientes do segmento **{segmento_alvo}**.
+        """
+    )
+
+    user_ids_target = tuple(df_target["user_id"].unique())
+    df_regras = carregar_regras_associacao(con, user_ids_target)
+
+    if not df_regras.empty:
+        col_reg1, col_reg2 = st.columns([1.4, 1])
+
+        with col_reg1:
+            st.markdown("**Top Regras de Associação Encontradas (Maiores Lifts):**")
+            st.dataframe(df_regras, use_container_width=True, hide_index=True)
+
+        with col_reg2:
+            top_regra = df_regras.iloc[0]
+            st.info(
+                f"""
+                💡 **Diretriz de Oferta Recomendada:** Ao disparar a campanha para **{segmento_alvo}**, promova a combinação de **{top_regra['Categoria Base']}** com **{top_regra['Categoria Recomendada (Cross-Sell)']}**.
+
+                * **Métrica de Lift ({top_regra['Lift']}x):** Clientes que compram *{top_regra['Categoria Base']}* têm uma chance **{top_regra['Lift']} vezes maior** de adquirir *{top_regra['Categoria Recomendada (Cross-Sell)']}* do que a média geral.
+                * **Confiança:** {top_regra['Confiança (%)']}% dos pedidos da categoria base contêm a categoria recomendada.
+                """
+            )
+    else:
+        st.warning(
+            "Não foram encontradas transações suficientes de múltiplos itens para calcular regras específicas para este grupo."
+        )
