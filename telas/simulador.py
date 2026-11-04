@@ -104,7 +104,7 @@ def carregar_regras_associacao(_con, user_ids_tuple=None):
 
 
 def aplicar_kmeans(df_rfm, n_clusters=4):
-    """Aplica K-Means com k=4 e rotula os clusters dinamicamente por perfil estatístico alinhado à literatura de segmentação RFM."""
+    """Aplica K-Means com k=4 e rotula os clusters dinamicamente por perfil estatístico."""
     df = df_rfm.copy()
     X = df[["recencia", "frequencia", "valor_monetario"]]
 
@@ -136,19 +136,19 @@ def aplicar_kmeans(df_rfm, n_clusters=4):
     cluster_map[id_ticket] = "💰 Clientes de Alto-Valor"
     ids_restantes.remove(id_ticket)
 
-    # 2. Cluster de Maior Recência (entre os restantes) -> Inativos / Hibernando
+    # 2. Cluster de Maior Recência (entre os restantes) -> Inativos
     perfil_r = perfil[perfil["cluster_id"].isin(ids_restantes)]
     id_inativo = int(perfil_r.loc[perfil_r["recencia_media"].idxmax()]["cluster_id"])
     cluster_map[id_inativo] = "💤 Clientes Inativos"
     ids_restantes.remove(id_inativo)
 
-    # 3. Cluster de Maior Frequência (entre os restantes) -> Leais / Recorrentes
+    # 3. Cluster de Maior Frequência (entre os restantes) -> Leais
     perfil_f = perfil[perfil["cluster_id"].isin(ids_restantes)]
     id_leal = int(perfil_f.loc[perfil_f["frequencia_media"].idxmax()]["cluster_id"])
     cluster_map[id_leal] = "💜 Clientes Leais"
     ids_restantes.remove(id_leal)
 
-    # 4. O último cluster vira Clientes Novos / Promissores
+    # 4. O último cluster vira Promissores
     if ids_restantes:
         cluster_map[int(ids_restantes[0])] = "🌱 Clientes Promissores"
 
@@ -171,7 +171,6 @@ def renderizar(con):
         )
         return
 
-    # Aplicação do K-Means com k=4 fixo
     df_clustered = aplicar_kmeans(df_rfm, n_clusters=4)
 
     cores_clusters = {
@@ -185,7 +184,7 @@ def renderizar(con):
     # SEÇÃO 1: VISUALIZAÇÃO E PERFIL DOS CLUSTERS (RFM)
     # ====================================================
     st.markdown("---")
-    st.markdown("### 📊 1. Perfis de Segmentos de Clientes")
+    st.markdown("### 📊 Perfis de Segmentos de Clientes")
 
     resumo_clusters = (
         df_clustered.groupby("cluster_nome")
@@ -204,7 +203,6 @@ def renderizar(con):
         .sort_values("Valor_Total", ascending=False)
     )
 
-    # Cartões de KPIs por Cluster
     cols = st.columns(len(resumo_clusters))
     for idx, row in resumo_clusters.reset_index(drop=True).iterrows():
         if idx < len(cols):
@@ -214,7 +212,6 @@ def renderizar(con):
                     value=f"{int(row['Total_Clientes']):,}".replace(",", "."),
                 )
 
-    # --- PAINEL TRIPLO DE GRÁFICOS (R, F, M) ---
     st.markdown("#### Perfil Comportamental Médio por Segmento")
     col_r, col_f, col_m = st.columns(3)
 
@@ -281,7 +278,6 @@ def renderizar(con):
         )
         st.plotly_chart(fig_m, use_container_width=True)
 
-    # --- GRÁFICO DE PIZZA E TABELA DETALHADA ---
     col_pie, col_tab = st.columns([0.7, 1.3])
 
     with col_pie:
@@ -342,7 +338,7 @@ def renderizar(con):
     # SEÇÃO 2: SIMULADOR PREDITIVO DE MARKETING ("WHAT-IF")
     # ====================================================
     st.markdown("---")
-    st.markdown("### 🎯 2. Simulador Preditivo de Campanhas de Marketing")
+    st.markdown("### 🎯 Simulador Preditivo de Campanhas de Marketing")
     st.markdown(
         """
         Configure as **alavancas de decisão** para simular o retorno financeiro aproximado e a viabilidade econômica de uma ação comercial direcionada a um segmento específico.
@@ -361,7 +357,7 @@ def renderizar(con):
             max_value=50.0,
             value=15.0,
             step=0.5,
-            help="Percentual de clientes do segmento que responderão positivamente à oferta.",
+            help="Percentual de clientes do segmento que responderão efetuando uma nova compra.",
         )
         pct_desconto = st.slider(
             "Desconto Promocional (%)",
@@ -401,21 +397,32 @@ def renderizar(con):
         if custo_total_campanha > 0
         else 0.0
     )
+    ratio_receita = (
+        (receita_bruta_proj / custo_total_campanha)
+        if custo_total_campanha > 0
+        else 0.0
+    )
 
-    # --- ORIENTAÇÃO NA COLUNA ESQUERDA ---
+    # --- ORIENTAÇÃO NA COLUNA ESQUERDA (3 NÍVEIS DE DECISÃO - BENCHMARK ADOBE) ---
     with col_sim1:
         st.markdown("---")
         st.markdown("#### 💡 Orientação para Tomada de Decisão")
-        if lucro_liquido_proj > 0:
+        if lucro_liquido_proj > 0 and ratio_receita >= 5.0:
             st.success(
                 f"""
-                **Cenário Viável e Lucrativo!** A campanha projetada para o segmento **{segmento_alvo}** gera um lucro líquido incremental de **US$ {formata_br(lucro_liquido_proj)}** com retorno sobre o investimento de **{formata_br(roi_proj, decimais=1)}%**. A alocação de orçamento para esta ação é recomendada.
+                **🟢 Cenário Altamente Viável e Lucrativo!** A campanha para **{segmento_alvo}** atinge uma proporção de receita de **{formata_br(ratio_receita, decimais=1)}:1** (superando o benchmark de 5:1), gerando um lucro líquido incremental de **US$ {formata_br(lucro_liquido_proj)}** e ROI de **{formata_br(roi_proj, decimais=1)}%**. A alocação de orçamento é **recomendada**.
+                """
+            )
+        elif lucro_liquido_proj > 0 and ratio_receita < 5.0:
+            st.warning(
+                f"""
+                **🟡 Cenário de Atenção (Margem de Risco / Lucro Marginal)!** Apesar do lucro líquido positivo (**US$ {formata_br(lucro_liquido_proj)}**), a proporção de receita de **{formata_br(ratio_receita, decimais=1)}:1** está abaixo do benchmark ideal de 5:1. Retornos abaixo de 5:1 oferecem pouca margem para absorver despesas operacionais indiretas. **Ação Recomendada:** Reduza o desconto promocional ou diminua os custos fixos para ampliar a margem.
                 """
             )
         else:
             st.error(
                 f"""
-                **Cenário Inviável (Déficit Financeiro)!** O desconto concedido (**{pct_desconto}%**) somado ao custo fixo de **US$ {formata_br(custo_fixo)}** consome toda a margem de contribuição gerada pelas vendas. **Ação Recomendada:** Reduza a taxa de desconto concedida ou aumente a meta de taxa de recompra esperada para reequilibrar o cenário.
+                **🔴 Cenário Inviável (Déficit Financeiro)!** O desconto concedido (**{pct_desconto}%**) e os custos fixos superam a margem de contribuição, gerando um prejuízo de **US$ {formata_br(lucro_liquido_proj)}** (Ratio: {formata_br(ratio_receita, decimais=1)}:1). **Ação Recomendada:** Reduza a taxa de desconto concedida ou aumente a meta de taxa de recompra esperada para reequilibrar o cenário.
                 """
             )
 
@@ -484,13 +491,13 @@ def renderizar(con):
     # SEÇÃO 3: RECOMENDAÇÃO DE CROSS-SELLING (ASSOCIAÇÃO)
     # ====================================================
     st.markdown("---")
-    st.markdown("### 🛍️ 3. Recomendação de Cross-Selling por Regras de Associação")
+    st.markdown("### 🛍️ Recomendação de Cross-Selling por Regras de Associação")
     st.markdown(
         f"""
         Análise de **Cesta de Compras (Market Basket Analysis)**. Identifica quais categorias possuem maior probabilidade de compra conjunta pelos clientes do segmento **{segmento_alvo}**.
         """
     )
-
+    
     user_ids_target = tuple(df_target["user_id"].unique())
     df_regras = carregar_regras_associacao(con, user_ids_target)
 
