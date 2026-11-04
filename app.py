@@ -60,5 +60,4 @@ else:
     elif st.session_state.pagina == "simulador": 
         simulador.renderizar(con.cursor())
     elif st.session_state.pagina == "relatorio":
-        st.title("📄 Relatórios do Sistema de Apoio à Decisão")
-        st.info("Módulo de Relatórios e Documentação do SAD.")
+        relatorios.renderizar(con.cursor())
