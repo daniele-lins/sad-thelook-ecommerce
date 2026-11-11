@@ -407,22 +407,37 @@ def renderizar(con):
     with col_sim1:
         st.markdown("---")
         st.markdown("#### 💡 Orientação para Tomada de Decisão")
+        
         if lucro_liquido_proj > 0 and ratio_receita >= 5.0:
             st.success(
                 f"""
-                **🟢 Cenário Altamente Viável e Lucrativo!** A campanha para **{segmento_alvo}** atinge uma proporção de receita de **{formata_br(ratio_receita, decimais=1)}:1** (superando o benchmark de 5:1), gerando um lucro líquido incremental de **US$ {formata_br(lucro_liquido_proj)}** e ROI de **{formata_br(roi_proj, decimais=1)}%**. A alocação de orçamento é **recomendada**.
+                **🟢 Cenário Altamente Viável e Lucrativo!**  
+                A campanha para **{segmento_alvo}** atinge uma proporção de receita de **{formata_br(ratio_receita, decimais=1)}:1** (superando o benchmark de 5:1), gerando um lucro líquido incremental de **US$ {formata_br(lucro_liquido_proj)}** e ROI de **{formata_br(roi_proj, decimais=1)}%**.  
+                A alocação de orçamento é **altamente recomendada**.
                 """
             )
-        elif lucro_liquido_proj > 0 and ratio_receita < 5.0:
+        elif lucro_liquido_proj > 0 and ratio_receita >= 2.0:
             st.warning(
                 f"""
-                **🟡 Cenário de Atenção (Margem de Risco / Lucro Marginal)!** Apesar do lucro líquido positivo (**US$ {formata_br(lucro_liquido_proj)}**), a proporção de receita de **{formata_br(ratio_receita, decimais=1)}:1** está abaixo do benchmark ideal de 5:1. Retornos abaixo de 5:1 oferecem pouca margem para absorver despesas operacionais indiretas. **Ação Recomendada:** Reduza o desconto promocional ou diminua os custos fixos para ampliar a margem.
+                **🟡 Cenário de Atenção (Lucro Marginal / Risco Operacional)!**  
+                A campanha gera lucro líquido positivo de **US$ {formata_br(lucro_liquido_proj)}** e proporção de **{formata_br(ratio_receita, decimais=1)}:1**. Está acima da linha de equilíbrio estrito (2:1), mas abaixo do benchmark ideal de 5:1.  
+                **Ação Recomendada:** Tente otimizar os custos fixos ou reduzir levemente o desconto para aproximar a campanha do benchmark de 5:1.
+                """
+            )
+        elif lucro_liquido_proj > 0 and ratio_receita < 2.0:
+            st.error(
+                f"""
+                **🔴 Cenário Inviável por Margem Insuficiente (Abaixo de 2:1)!**  
+                Embora apresente lucro direto positivo (**US$ {formata_br(lucro_liquido_proj)}**), a proporção de receita é de apenas **{formata_br(ratio_receita, decimais=1)}:1**, abaixo de 2:1, considerado o mínimo financeiramente viável.  
+                **Ação Recomendada:** Reduza o desconto promocional ou aumente a meta de taxa de resposta para elevar a proporção de retorno.
                 """
             )
         else:
             st.error(
                 f"""
-                **🔴 Cenário Inviável (Déficit Financeiro)!** O desconto concedido (**{pct_desconto}%**) e os custos fixos superam a margem de contribuição, gerando um prejuízo de **US$ {formata_br(lucro_liquido_proj)}** (Ratio: {formata_br(ratio_receita, decimais=1)}:1). **Ação Recomendada:** Reduza a taxa de desconto concedida ou aumente a meta de taxa de recompra esperada para reequilibrar o cenário.
+                **🔴 Cenário Inviável por Prejuízo Direto (Déficit Financeiro)!**  
+                O desconto concedido (**{pct_desconto}%**) e os custos fixos superam a margem de contribuição das vendas, gerando um prejuízo direto de **US$ {formata_br(abs(lucro_liquido_proj))}** (Proporção: {formata_br(ratio_receita, decimais=1)}:1).  
+                **Ação Recomendada:** Reestruture a proposta ou cancele a execução desta campanha.
                 """
             )
 
