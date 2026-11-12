@@ -397,7 +397,7 @@ def renderizar(con):
         resultados_simulacao.sort(key=lambda x: x["segmento"], reverse=True)
         
         for res in resultados_simulacao:
-            badge_html = f"<span style='background-color:{res['cor_hex']}; color:white; padding: 3px 12px; border-radius: 12px; font-weight: bold; font-size: 13px;'>{res['badge_icon']} {res['class_label']}</span>"
+            badge_html = f"<span style='background-color:{res['cor_hex']}; color:white; padding: 3px 12px; border-radius: 12px; font-weight: bold; font-size: 13px;'>{res['class_label']}</span>"
             
             with st.expander(f"{res['segmento']}  •  {res['class_label']} ({res['badge_icon']})", expanded=False):
                 st.markdown(f"**Classificação:** {badge_html}", unsafe_allow_html=True)
