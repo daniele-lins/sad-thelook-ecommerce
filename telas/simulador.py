@@ -499,7 +499,7 @@ def renderizar(con):
                             else "#D9534F"
                         ),
                     },
-                    title=f"Demonstrativo do Resultado Simulado — {res['segmento']}",
+                    title=f"Demonstrativo do Resultado Simulado: {res['segmento']}",
                 )
                 fig_sim.update_layout(
                     height=240,
