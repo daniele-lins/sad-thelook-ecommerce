@@ -50,25 +50,8 @@ def carregar_dados_rfm(_con):
     GROUP BY oi.user_id
     HAVING SUM(oi.sale_price) > 0
     """
-    try:
-        df = _con.execute(query).df()
-        return df if not df.empty else gerar_dados_mock_rfm()
-    except Exception:
-        return gerar_dados_mock_rfm()
-
-
-def gerar_dados_mock_rfm():
-    """Dados simulados de segurança caso a consulta no banco falhe."""
-    np.random.seed(42)
-    n = 1000
-    return pd.DataFrame({
-        "user_id": range(1, n + 1),
-        "recencia": np.random.randint(1, 365, n),
-        "frequencia": np.random.randint(1, 10, n),
-        "valor_monetario": np.random.uniform(50, 2000, n),
-        "custo_medio_produto": np.random.uniform(20, 80, n),
-        "lucro_total": np.random.uniform(20, 1000, n),
-    })
+    df = _con.execute(query).df()
+    return df
 
 
 def aplicar_kmeans(df_rfm, n_clusters=4):
@@ -449,7 +432,7 @@ def renderizar(con):
                 st.markdown(
                     f"**Classificação:** {badge_html}", unsafe_allow_html=True
                 )
-                st.markdown(f"**Parecer Teórico:** {res['justificativa']}")
+                st.markdown(f"**Parecer da Simulação:** {res['justificativa']}")
                 st.markdown("---")
 
                 c1, c2, c3 = st.columns(3)
