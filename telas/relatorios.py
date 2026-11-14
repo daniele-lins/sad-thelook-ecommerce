@@ -1,297 +1,422 @@
-import datetime
-import numpy as np
-import pandas as pd
+import io
 import streamlit as st
+import pandas as pd
+import numpy as np
+import openpyxl
+
+# IMPORTA AS MESMAS FUNÇÕES E CATEGORIAS DO SIMULADOR.PY
+from .simulador import carregar_dados_rfm, aplicar_kmeans, ORDEM_ALFABETICA_CLUSTERS
 
 
 def formata_br(valor, prefixo="", sufixo="", decimais=2):
-    """Formata números para o padrão brasileiro (milhar com ponto, decimal com vírgula)."""
+    """Formata números no padrão brasileiro (milhar com ponto, decimal com vírgula)."""
     if valor is None or pd.isna(valor):
         return "N/A"
     try:
-        fmt = (
-            f"{valor:,.{decimais}f}"
-            .replace(",", "X")
-            .replace(".", ",")
-            .replace("X", ".")
-        )
+        fmt = f"{valor:,.{decimais}f}".replace(",", "X").replace(".", ",").replace("X", ".")
         return f"{prefixo}{fmt}{sufixo}"
     except Exception:
         return str(valor)
 
 
-@st.cache_data(ttl=300)
-def obter_limites_datas(_con):
-    """Obtém a data mínima e máxima presentes na base de pedidos concluídos."""
-    query = """
-        SELECT 
-            MIN(TRY_CAST(created_at AS DATE)) as min_date, 
-            MAX(TRY_CAST(created_at AS DATE)) as max_date 
-        FROM order_items 
-        WHERE status = 'Complete'
+def gerar_excel_com_observacao(df_dados, parametros_dict):
     """
-    df = _con.execute(query).df()
-    min_d = df.iloc[0]["min_date"]
-    max_d = df.iloc[0]["max_date"]
-
-    if pd.isna(min_d):
-        min_d = datetime.date(2019, 1, 1)
-    if pd.isna(max_d):
-        max_d = datetime.date(2024, 1, 1)
-
-    return min_d, max_d
-
-
-@st.cache_data(ttl=300)
-def gerar_diagnostico_periodo(_con, dt_inicio, dt_fim):
-    """Consulta consolidada de vendas e margem no DuckDB para a janela temporal selecionada."""
-    query = f"""
-        SELECT 
-            COUNT(DISTINCT oi.order_id) AS total_pedidos, 
-            COUNT(DISTINCT oi.user_id) AS total_clientes, 
-            COALESCE(SUM(oi.sale_price), 0) AS receita_total, 
-            COALESCE(SUM(p.cost), 0) AS custo_total, 
-            COALESCE(SUM(oi.sale_price - p.cost), 0) AS lucro_bruto, 
-            COALESCE(AVG(oi.sale_price), 0) AS ticket_medio_item 
-        FROM order_items oi 
-        JOIN products p ON oi.product_id = p.id 
-        WHERE oi.status = 'Complete' 
-          AND TRY_CAST(oi.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}'
+    Gera um arquivo .xlsx em memória contendo a tabela consolidada (baseline + simulação)
+    e adiciona a linha de observação dos parâmetros no rodapé.
     """
-    return _con.execute(query).df().iloc[0]
+    buffer = io.BytesIO()
+    # Prepara o texto formatado dos parâmetros
+    texto_params = "Parâmetros utilizados na simulação: " + "; ".join(
+        [f"{k} = {v}" for k, v in parametros_dict.items()]
+    )
 
+    df_export = df_dados.copy()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_export.to_excel(writer, sheet_name="Simulacao_Clusters", index=False)
+        worksheet = writer.sheets["Simulacao_Clusters"]
+        linha_rodape = len(df_export) + 3  # Deixa uma linha em branco antes do rodapé
+        worksheet.cell(row=linha_rodape, column=1, value=texto_params)
 
-@st.cache_data(ttl=300)
-def carregar_rfm_periodo(_con, dt_inicio, dt_fim):
-    """Extrai métricas comportamentais RFM dos clientes que compraram na janela temporal."""
-    query = f"""
-        WITH rfm AS (
-            SELECT 
-                oi.user_id, 
-                DATEDIFF('day', MAX(TRY_CAST(oi.created_at AS DATE)), '{dt_fim}') AS recencia, 
-                COUNT(DISTINCT oi.order_id) AS frequencia, 
-                SUM(oi.sale_price) AS valor_monetario 
-            FROM order_items oi 
-            WHERE oi.status = 'Complete' 
-              AND TRY_CAST(oi.created_at AS DATE) BETWEEN '{dt_inicio}' AND '{dt_fim}' 
-            GROUP BY oi.user_id 
-            HAVING SUM(oi.sale_price) > 0
-        )
-        SELECT 
-            COUNT(user_id) as total_compradores, 
-            COALESCE(AVG(recencia), 0) as recencia_media, 
-            COALESCE(AVG(frequencia), 0) as frequencia_media, 
-            COALESCE(AVG(valor_monetario), 0) as gasto_medio, 
-            COUNT(CASE WHEN recencia > 60 THEN 1 END) as qtd_inativos_60d, 
-            COUNT(CASE WHEN recencia <= 30 THEN 1 END) as qtd_ativos_30d 
-        FROM rfm
-    """
-    return _con.execute(query).df().iloc[0]
+    buffer.seek(0)
+    return buffer
 
 
 def renderizar(con):
-    st.header("📄 Relatório Executivo & Prescrições do SAD")
-    st.markdown(
-        """
-        Este módulo consolida a **saúde financeira do e-commerce** e gera **diretrizes estratégicas recomendadas dinamicamente**, adaptando os pareceres conforme o filtro de período selecionado pelo gestor.
-        """
+    st.title("📊 Visão Analítica do Negócio & Relatórios Executivos")
+    st.caption(
+        "Consolidação estratégica de segmentação, simulações, tráfego web, vendas e perfil de clientes."
     )
 
-    # ====================================================
-    # FILTRO DINÂMICO DE PERÍODO (BARRA DE CONTROLE)
-    # ====================================================
-    min_data_db, max_data_db = obter_limites_datas(con)
-
+    # ==============================================================================
+    # PARTE 1: SEGMENTAÇÃO DE CLIENTES & PARECER DA ÚLTIMA SIMULAÇÃO
+    # ==============================================================================
     st.markdown("---")
-    st.markdown("### 🗓️ Seleção do Período de Análise")
-    col_f1, col_f2, col_f3 = st.columns([1.2, 1, 1])
+    st.subheader("🎯 Parecer da Simulação e Diagnóstico de Clusters")
 
+    # Recupera parâmetros salvos do simulador (prioriza chaves persistentes val_*)
+    tx_base = st.session_state.get(
+        "val_tx_conversao", st.session_state.get("sim_tx_conversao", 12.0)
+    )
+    desc_prom = st.session_state.get(
+        "val_pct_desconto", st.session_state.get("sim_pct_desconto", 10.0)
+    )
+    custo_fx = st.session_state.get(
+        "val_custo_fixo", st.session_state.get("sim_custo_fixo", 1000.0)
+    )
+    romi_meta = st.session_state.get(
+        "val_meta_romi", st.session_state.get("sim_meta_romi", 4.0)
+    )
+
+    # Dicionário formatado com a função formata_br
+    dict_params = {
+        "Taxa Média de Resposta Base (%)": formata_br(tx_base, sufixo="%", decimais=1),
+        "Desconto Promocional (%)": formata_br(desc_prom, sufixo="%", decimais=1),
+        "Custo Fixo por Segmento (US$)": formata_br(custo_fx, prefixo="US$ ", decimais=2),
+        "Meta de ROMI (x:1)": formata_br(romi_meta, sufixo=":1", decimais=1),
+    }
+
+    st.markdown("##### ⚙️ Parâmetros Utilizados na Última Simulação")
+    col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+    col_p1.metric("Taxa Resposta Base", dict_params["Taxa Média de Resposta Base (%)"])
+    col_p2.metric("Desconto Promocional", dict_params["Desconto Promocional (%)"])
+    col_p3.metric("Custo Fixo / Segmento", dict_params["Custo Fixo por Segmento (US$)"])
+    col_p4.metric("Meta de ROMI", dict_params["Meta de ROMI (x:1)"])
+
+    # CHAMA A MESMA CLUSTERIZAÇÃO K-MEANS DO SIMULADOR.PY
+    df_rfm = carregar_dados_rfm(con)
+
+    if not df_rfm.empty:
+        df_clustered = aplicar_kmeans(df_rfm, n_clusters=4)
+
+        # Resumo baseline idêntico ao simulador.py
+        resumo_clusters = (
+            df_clustered.groupby("cluster_nome", observed=False)
+            .agg(
+                Total_Clientes=("user_id", "count"),
+                Recencia_Media=("recencia", "mean"),
+                Frequencia_Media=("frequencia", "mean"),
+                Ticket_Medio=(
+                    "valor_monetario",
+                    lambda x: (x / df_clustered.loc[x.index, "frequencia"]).mean(),
+                ),
+                Valor_Total=("valor_monetario", "sum"),
+                Lucro_Total=("lucro_total", "sum"),
+            )
+            .reset_index()
+            .sort_values("cluster_nome")
+        )
+
+        # Tabela 1A: Baseline K-Means Formatada em PT-BR
+        st.markdown("##### 📋 Dados Atuais dos Segmentos")
+        df_1a_display = pd.DataFrame(
+            {
+                "Segmento (Cluster)": resumo_clusters["cluster_nome"],
+                "Total de Clientes": resumo_clusters["Total_Clientes"].apply(
+                    lambda x: formata_br(x, decimais=0)
+                ),
+                "Recência Média (Dias)": resumo_clusters["Recencia_Media"].apply(
+                    lambda x: formata_br(x, decimais=1)
+                ),
+                "Frequência Média (Pedidos)": resumo_clusters["Frequencia_Media"].apply(
+                    lambda x: formata_br(x, decimais=2)
+                ),
+                "Ticket Médio (US$)": resumo_clusters["Ticket_Medio"].apply(
+                    lambda x: formata_br(x, decimais=2)
+                ),
+                "Receita Total (US$)": resumo_clusters["Valor_Total"].apply(
+                    lambda x: formata_br(x, decimais=2)
+                ),
+                "Lucro Total (US$)": resumo_clusters["Lucro_Total"].apply(
+                    lambda x: formata_br(x, decimais=2)
+                ),
+            }
+        )
+        st.dataframe(df_1a_display, use_container_width=True, hide_index=True)
+
+        # Tabela 1B: Resultado Simulado por Cluster Formatado em PT-BR
+        st.markdown("##### 🚀 Resultado Simulado por Cluster")
+        recencia_global = df_clustered["recencia"].mean()
+        dados_simulados_display = []
+        dados_consolidados_excel = []
+
+        for _, row_cluster in resumo_clusters.iterrows():
+            seg = str(row_cluster["cluster_nome"])
+            df_target = df_clustered[df_clustered["cluster_nome"] == seg]
+
+            n_clientes = len(df_target)
+            ticket_medio = row_cluster["Ticket_Medio"]
+            custo_prod = df_target["custo_medio_produto"].mean()
+            recencia_seg = row_cluster["Recencia_Media"]
+
+            # Fórmulas de resposta e simulação do modelo
+            fator_recencia = np.exp(-0.5 * (recencia_seg / recencia_global))
+            fator_promocional = 1.0 + (desc_prom / 100.0) * 1.2
+            taxa_conversao_efetiva = min(tx_base * fator_recencia * fator_promocional, 50.0)
+
+            clientes_impactados = int(n_clientes * (taxa_conversao_efetiva / 100.0))
+            receita_bruta = clientes_impactados * ticket_medio
+            custo_desconto = receita_bruta * (desc_prom / 100.0)
+            custo_total = custo_desconto + custo_fx
+
+            lucro_bruto = clientes_impactados * (ticket_medio - custo_prod)
+            lucro_liquido = lucro_bruto - custo_total
+            ratio_receita = (receita_bruta / custo_total) if custo_total > 0 else 0.0
+
+            if lucro_liquido > 0 and ratio_receita >= romi_meta:
+                diag = "Bom"
+            elif lucro_liquido > 0:
+                diag = "Médio"
+            else:
+                diag = "Ruim"
+
+            # Tabela 1B exibida em tela
+            dados_simulados_display.append(
+                {
+                    "Segmento (Cluster)": seg,
+                    "Taxa Resposta Efetiva (%)": formata_br(
+                        taxa_conversao_efetiva, decimais=1
+                    ),
+                    "Clientes Convertidos": formata_br(clientes_impactados, decimais=0),
+                    "Receita Projetada (US$)": formata_br(
+                        receita_bruta, decimais=2
+                    ),
+                    "Custo Total (US$)": formata_br(custo_total, decimais=2),
+                    "Lucro Líquido Proj. (US$)": formata_br(
+                        lucro_liquido, decimais=2
+                    ),
+                    "ROMI (x:1)": formata_br(ratio_receita, decimais=2),
+                    "Diagnóstico": diag,
+                }
+            )
+
+            # UNIFICA BASELINE + SIMULAÇÃO NA MESMA LINHA PARA O EXCEL
+            dados_consolidados_excel.append(
+                {
+                    "Segmento (Cluster)": seg,
+                    "Total de Clientes (Atual)": formata_br(n_clientes, decimais=0),
+                    "Recência Média (Dias)": formata_br(recencia_seg, decimais=1, sufixo="d"),
+                    "Frequência Média (Pedidos)": formata_br(
+                        row_cluster["Frequencia_Media"], decimais=2
+                    ),
+                    "Ticket Médio (US$)": formata_br(ticket_medio, prefixo="US$ ", decimais=2),
+                    "Receita Histórica Total (US$)": formata_br(
+                        row_cluster["Valor_Total"], prefixo="US$ ", decimais=2
+                    ),
+                    "Lucro Histórico Total (US$)": formata_br(
+                        row_cluster["Lucro_Total"], prefixo="US$ ", decimais=2
+                    ),
+                    "Taxa Resposta Efetiva (%)": formata_br(
+                        taxa_conversao_efetiva, sufixo="%", decimais=1
+                    ),
+                    "Clientes Convertidos (Simulado)": formata_br(clientes_impactados, decimais=0),
+                    "Receita Projetada (US$)": formata_br(
+                        receita_bruta, prefixo="US$ ", decimais=2
+                    ),
+                    "Custo Total Simulado (US$)": formata_br(
+                        custo_total, prefixo="US$ ", decimais=2
+                    ),
+                    "Lucro Líquido Proj. (US$)": formata_br(
+                        lucro_liquido, prefixo="US$ ", decimais=2
+                    ),
+                    "ROMI (x:1)": formata_br(ratio_receita, sufixo=":1", decimais=2),
+                    "Diagnóstico": diag,
+                }
+            )
+
+        df_simulacao_resultado = pd.DataFrame(dados_simulados_display)
+        st.dataframe(df_simulacao_resultado, use_container_width=True, hide_index=True)
+
+        # DataFrame Consolidado unificando as duas tabelas
+        df_consolidado_excel = pd.DataFrame(dados_consolidados_excel)
+
+        # Botão de Exportação do Excel Unificado
+        excel_bytes = gerar_excel_com_observacao(df_consolidado_excel, dict_params)
+        st.download_button(
+            label="📥 Exportar Simulação Completa em Excel (.xlsx)",
+            data=excel_bytes,
+            file_name="relatorio_simulacao_clusters_completo.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+    # ==============================================================================
+    # PARTE 2: ANALÍTICO DE TRÁFEGO (EVENTOS WEB)
+    # ==============================================================================
+    st.markdown("---")
+    st.subheader("🌐 Analítico Geral de Tráfego Web")
+    st.caption("Visão detalhada de todos os eventos de navegação no site.")
+
+    col_f1, col_f2 = st.columns(2)
     with col_f1:
-        opcao_periodo = st.selectbox(
-            "Atalho de Intervalo",
-            options=[
-                "Todo o Histórico",
-                "Últimos 30 Dias",
-                "Últimos 90 Dias",
-                "Ano de 2023",
-                "Personalizado",
-            ],
-            index=0,
-        )
-
-        if opcao_periodo == "Todo o Histórico":
-            dt_inicio = min_data_db
-            dt_fim = max_data_db
-        elif opcao_periodo == "Últimos 30 Dias":
-            dt_fim = max_data_db
-            dt_inicio = max_data_db - datetime.timedelta(days=30)
-        elif opcao_periodo == "Últimos 90 Dias":
-            dt_fim = max_data_db
-            dt_inicio = max_data_db - datetime.timedelta(days=90)
-        elif opcao_periodo == "Ano de 2023":
-            dt_inicio = datetime.date(2023, 1, 1)
-            dt_fim = datetime.date(2023, 12, 31)
-        else:
-            dt_inicio = min_data_db
-            dt_fim = max_data_db
-
+        data_inicio_e = st.date_input("Data Inicial (Eventos)", pd.to_datetime("2023-01-01"))
     with col_f2:
-        dt_inicio_sel = st.date_input(
-            "Data Inicial",
-            value=dt_inicio,
-            min_value=min_data_db,
-            max_value=max_data_db,
+        data_fim_e = st.date_input("Data Final (Eventos)", pd.to_datetime("2024-12-31"))
+
+    query_eventos = f"""
+        SELECT 
+            TRY_CAST(created_at AS TIMESTAMP) AS "Data e Hora",
+            event_type AS "Tipo de Ação",
+            traffic_source AS "Origem do Tráfego",
+            browser AS "Navegador",
+            uri AS "Página Acessada (URI)",
+            sequence_number AS "Ordem no Clique da Sessão",
+            city AS "Cidade",
+            state AS "Estado"
+        FROM events
+        WHERE TRY_CAST(created_at AS DATE) BETWEEN '{data_inicio_e}' AND '{data_fim_e}'
+        ORDER BY created_at DESC
+        LIMIT 5000
+    """
+
+    try:
+        df_eventos = con.execute(query_eventos).df()
+        if not df_eventos.empty:
+            df_eventos["Ordem no Clique da Sessão"] = df_eventos["Ordem no Clique da Sessão"].apply(
+                lambda x: formata_br(x, decimais=0)
+            )
+    except Exception:
+        df_eventos = pd.DataFrame()
+
+    if not df_eventos.empty:
+        st.dataframe(df_eventos, use_container_width=True, hide_index=True)
+        csv_eventos = df_eventos.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Exportar Analítico de Tráfego (CSV)",
+            data=csv_eventos,
+            file_name="analitico_trafego_eventos.csv",
+            mime="text/csv",
         )
+    else:
+        st.warning("Nenhum evento de tráfego encontrado para o período selecionado.")
 
-    with col_f3:
-        dt_fim_sel = st.date_input(
-            "Data Final",
-            value=dt_fim,
-            min_value=min_data_db,
-            max_value=max_data_db,
+    # ==============================================================================
+    # PARTE 3: ANALÍTICO DE PEDIDOS E COMPRAS DE PRODUTOS
+    # ==============================================================================
+    st.markdown("---")
+    st.subheader("🛍️ Analítico Completo de Pedidos e Vendas de Produtos")
+    st.caption(
+        "Detalhamento comercial e logístico das vendas agrupado por item/categoria, omitindo dados dos clientes."
+    )
+
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        data_inicio_p = st.date_input("Data Inicial (Pedidos)", pd.to_datetime("2023-01-01"))
+    with col_p2:
+        data_fim_p = st.date_input("Data Final (Pedidos)", pd.to_datetime("2024-12-31"))
+
+    query_pedidos = f"""
+        SELECT 
+            TRY_CAST(oi.created_at AS TIMESTAMP) AS "Data do Pedido",
+            p.category AS "Categoria",
+            p.name AS "Nome do Produto",
+            p.brand AS "Marca",
+            p.department AS "Departamento",
+            oi.status AS "Status do Item",
+            COUNT(oi.id) AS "Quantidade Vendida",
+            ROUND(SUM(oi.sale_price), 2) AS "Receita Total (US$)",
+            ROUND(SUM(p.cost), 2) AS "Custo Total (US$)",
+            ROUND(SUM(oi.sale_price - p.cost), 2) AS "Margem de Lucro Bruto (US$)"
+        FROM order_items oi
+        JOIN products p ON oi.product_id = p.id
+        WHERE TRY_CAST(oi.created_at AS DATE) BETWEEN '{data_inicio_p}' AND '{data_fim_p}'
+        GROUP BY 1, 2, 3, 4, 5, 6
+        ORDER BY "Data do Pedido" DESC
+        LIMIT 5000
+    """
+
+    try:
+        df_pedidos = con.execute(query_pedidos).df()
+        if not df_pedidos.empty:
+            df_pedidos["Quantidade Vendida"] = df_pedidos["Quantidade Vendida"].apply(
+                lambda x: formata_br(x, decimais=0)
+            )
+            df_pedidos["Receita Total (US$)"] = df_pedidos["Receita Total (US$)"].apply(
+                lambda x: formata_br(x, prefixo="US$ ", decimais=2)
+            )
+            df_pedidos["Custo Total (US$)"] = df_pedidos["Custo Total (US$)"].apply(
+                lambda x: formata_br(x, prefixo="US$ ", decimais=2)
+            )
+            df_pedidos["Margem de Lucro Bruto (US$)"] = df_pedidos[
+                "Margem de Lucro Bruto (US$)"
+            ].apply(lambda x: formata_br(x, prefixo="US$ ", decimais=2))
+    except Exception:
+        df_pedidos = pd.DataFrame()
+
+    if not df_pedidos.empty:
+        st.dataframe(df_pedidos, use_container_width=True, hide_index=True)
+        csv_pedidos = df_pedidos.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Exportar Analítico de Pedidos (CSV)",
+            data=csv_pedidos,
+            file_name="analitico_pedidos_vendas.csv",
+            mime="text/csv",
         )
+    else:
+        st.warning("Nenhum pedido encontrado para o período selecionado.")
 
-    if dt_inicio_sel > dt_fim_sel:
-        st.error("Erro: A Data Inicial não pode ser posterior à Data Final.")
-        return
-
-    # Processamento dos Dados do Período Selecionado
-    diag = gerar_diagnostico_periodo(con, dt_inicio_sel, dt_fim_sel)
-    rfm = carregar_rfm_periodo(con, dt_inicio_sel, dt_fim_sel)
-
-    # Métricas Derivadas
-    receita = diag["receita_total"]
-    lucro = diag["lucro_bruto"]
-    pedidos = diag["total_pedidos"]
-    margem_pct = (lucro / receita * 100) if receita > 0 else 0
-    aov = (receita / pedidos) if pedidos > 0 else 0
-    compradores = rfm["total_compradores"]
-
-    # ====================================================
-    # SEÇÃO 1: QUADRO DE DESEMPENHO OPERACIONAL DO PERÍODO
-    # ====================================================
+    # ==============================================================================
+    # PARTE 4: ANALÍTICO DE CLIENTES (ANONIMIZADO)
+    # ==============================================================================
     st.markdown("---")
-    st.markdown(
-        f"### 📊 Desempenho Operacional ({dt_inicio_sel.strftime('%d/%m/%Y')} a {dt_fim_sel.strftime('%d/%m/%Y')})"
+    st.subheader("👥 Analítico Demográfico e Perfil de Valor de Clientes")
+    st.caption(
+        "Visão sumarizada do comportamento de compras e LTV por perfil demográfico e canal, sem exposição de IDs ou nomes."
     )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Receita Bruta", formata_br(receita, prefixo="US$ "))
-    c2.metric("Lucro Bruto", formata_br(lucro, prefixo="US$ "))
-    c3.metric("Margem Bruta Média", f"{formata_br(margem_pct, decimais=1)}%")
-    c4.metric("Ticket Médio (AOV)", formata_br(aov, prefixo="US$ "))
+    col_u1, col_u2 = st.columns(2)
+    with col_u1:
+        data_inicio_u = st.date_input("Data Inicial (Cadastro)", pd.to_datetime("2020-01-01"))
+    with col_u2:
+        data_fim_u = st.date_input("Data Final (Cadastro)", pd.to_datetime("2024-12-31"))
 
-    st.markdown("---")
+    query_clientes = f"""
+        SELECT 
+            TRY_CAST(u.created_at AS DATE) AS "Data de Cadastro",
+            u.gender AS "Gênero",
+            u.age AS "Idade",
+            u.state AS "Estado",
+            u.country AS "País",
+            u.traffic_source AS "Canal de Aquisição",
+            COUNT(DISTINCT o.order_id) AS "Quantidade de Compras",
+            ROUND(COALESCE(SUM(oi.sale_price), 0), 2) AS "Faturamento Gerado (US$)",
+            ROUND(COALESCE(SUM(p.cost), 0), 2) AS "Custo Total do Cliente (US$)",
+            ROUND(COALESCE(SUM(oi.sale_price - p.cost), 0), 2) AS "LTV / Lucro Gerado (US$)"
+        FROM users u
+        LEFT JOIN orders o ON u.id = o.user_id AND o.status = 'Complete'
+        LEFT JOIN order_items oi ON o.order_id = oi.order_id
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE TRY_CAST(u.created_at AS DATE) BETWEEN '{data_inicio_u}' AND '{data_fim_u}'
+        GROUP BY u.id, u.created_at, u.gender, u.age, u.state, u.country, u.traffic_source
+        ORDER BY "Faturamento Gerado (US$)" DESC
+        LIMIT 5000
+    """
 
-    # ====================================================
-    # SEÇÃO 2: RECOMENDAÇÕES PRESCRITIVAS DINÂMICAS DO SAD
-    # ====================================================
-    st.markdown("### 🎯 Diretrizes Estratégicas Adaptativas (Motor SAD)")
-    st.markdown(
-        "As prescrições abaixo são **recalculadas em tempo real** de acordo com os indicadores do período filtrado:"
-    )
+    try:
+        df_clientes = con.execute(query_clientes).df()
+        if not df_clientes.empty:
+            df_clientes["Idade"] = df_clientes["Idade"].apply(lambda x: formata_br(x, decimais=0))
+            df_clientes["Quantidade de Compras"] = df_clientes["Quantidade de Compras"].apply(
+                lambda x: formata_br(x, decimais=0)
+            )
+            df_clientes["Faturamento Gerado (US$)"] = df_clientes["Faturamento Gerado (US$)"].apply(
+                lambda x: formata_br(x, prefixo="US$ ", decimais=2)
+            )
+            df_clientes["Custo Total do Cliente (US$)"] = df_clientes[
+                "Custo Total do Cliente (US$)"
+            ].apply(lambda x: formata_br(x, prefixo="US$ ", decimais=2))
+            df_clientes["LTV / Lucro Gerado (US$)"] = df_clientes["LTV / Lucro Gerado (US$)"].apply(
+                lambda x: formata_br(x, prefixo="US$ ", decimais=2)
+            )
+    except Exception:
+        df_clientes = pd.DataFrame()
 
-    # --- REGRA 1: DENSIDADE DE INATIVOS E REATIVAÇÃO ---
-    pct_inativos = (
-        (rfm["qtd_inativos_60d"] / compradores * 100) if compradores > 0 else 0
-    )
-
-    with st.expander(
-        "📌 **Diretriz 1: Reativação de Clientes & Retenção de Base**",
-        expanded=True,
-    ):
-        if pct_inativos > 30 or rfm["recencia_media"] > 45:
-            st.warning(
-                f"🚨 **Alerta de Inatividade Elevada:** No período selecionado, **{formata_br(pct_inativos, decimais=1)}%** dos compradores "
-                f"({int(rfm['qtd_inativos_60d'])} clientes) possuem recência superior a 60 dias sem novas compras. A recência média do grupo é "
-                f"de **{formata_br(rfm['recencia_media'], decimais=0)} dias**."
-            )
-            st.markdown(
-                "* **Ação Recomendada:** Disparar campanha de reativação imediata oferecendo um cupom promocional limitado a **10%** de desconto. "
-                "Exigir ROI mínimo projetado de **5:1** no simulador para evitar prejuízo operacional."
-            )
-        else:
-            st.success(
-                f"✅ **Base Ativa e Engajada:** No período filtrado, **{formata_br(100 - pct_inativos, decimais=1)}%** dos compradores "
-                f"realizaram pedidos recentemente. A recência média é saudável (**{formata_br(rfm['recencia_media'], decimais=0)} dias**)."
-            )
-            st.markdown(
-                "* **Ação Recomendada:** Focar os esforços em campanhas de incentivo à segunda compra (régua de onboarding) com desconto suave de **5%**, priorizando o cross-selling."
-            )
-
-    # --- REGRA 2: RENTABILIDADE E POLÍTICA DE PREÇOS / CROSS-SELLING ---
-    with st.expander(
-        "📌 **Diretriz 2: Maximização de Margem e Vendas Cruzadas (Cross-Selling)**",
-        expanded=True,
-    ):
-        if margem_pct < 35.0:
-            st.error(
-                f"⚠️ **Margem de Contribuição Pressionada:** A margem bruta média da janela filtrada é de **{formata_br(margem_pct, decimais=1)}%** "
-                "(abaixo da meta de 35%). Conceder descontos irrestritos neste período comprometerá a rentabilidade líquida."
-            )
-            st.markdown(
-                f"* **Ação Recomendada:** Suspender descontos em dinheiro (cash discounts). Substituir por benefícios não monetários (ex: frete grátis condicionado a um valor mínimo de pedido **US$ {formata_br(aov * 1.2, decimais=0)}**)."
-            )
-        else:
-            st.info(
-                f"📈 **Margem Bruta Saudável:** A margem média do período é de **{formata_br(margem_pct, decimais=1)}%**, garantindo folga financeira para ações comerciais."
-            )
-            st.markdown(
-                f"* **Ação Recomendada:** Aplicar regras de **Cross-Selling (Associação de Produtos)** recomendando itens complementares do catálogo para elevar o ticket médio atual de **US$ {formata_br(aov)}**."
-            )
-
-    # --- REGRA 3: GOVERNANÇA E SIMULAÇÃO OBRIGATÓRIA "WHAT-IF" ---
-    with st.expander(
-        "📌 **Diretriz 3: Governança Orçamentária via Simulador Preditivo**",
-        expanded=True,
-    ):
-        st.markdown(
-            f"""
-            * **Diagnóstico da Janela:** O período analisado registrou **{formata_br(pedidos, decimais=0)} pedidos** com faturamento de **{formata_br(receita, prefixo="US$ ")}** e custo de produtos de **{formata_br(diag['custo_total'], prefixo="US$ ")}**.
-            * **Regra de Decisão do SAD:** Nenhuma verba publicitária deve ser liberada sem validação prévia no **Simulador Preditivo "What-If"**. O projeto da campanha deve obrigatoriamente demonstrar **Lucro Líquido Incremental > 0** e **ROI superior ao benchmark de 500% (5:1)**.
-            """
+    if not df_clientes.empty:
+        st.dataframe(df_clientes, use_container_width=True, hide_index=True)
+        csv_clientes = df_clientes.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📥 Exportar Analítico de Clientes (CSV)",
+            data=csv_clientes,
+            file_name="analitico_perfil_clientes.csv",
+            mime="text/csv",
         )
-
-    # ====================================================
-    # SEÇÃO 3: EXPORTAÇÃO DO RELATÓRIO DINÂMICO
-    # ====================================================
-    st.markdown("---")
-    st.markdown("### 📥 Exportação do Relatório Executivo")
-
-    relatorio_texto = f"""====================================================
-THELOOK E-COMMERCE - RELATÓRIO EXECUTIVO DO SAD
-====================================================
-Período Analisado: {dt_inicio_sel.strftime('%d/%m/%Y')} a {dt_fim_sel.strftime('%d/%m/%Y')}
-Emissão: Documento Gerado Automaticamente pelo Sistema de Apoio à Decisão
-
-1. DIAGNÓSTICO FINANCEIRO E OPERACIONAL DO PERÍODO:
-   - Receita Bruta Acumulada: US$ {formata_br(receita)}
-   - Lucro Bruto Comercial: US$ {formata_br(lucro)}
-   - Margem Bruta Média: {formata_br(margem_pct, decimais=1)}%
-   - Total de Pedidos Concluídos: {int(pedidos)}
-   - Ticket Médio por Pedido (AOV): US$ {formata_br(aov)}
-   - Clientes Compradores Ativos: {int(compradores)}
-
-2. DIAGNÓSTICO COMPORTAMENTAL (RFM NO PERÍODO):
-   - Recência Média da Base: {formata_br(rfm['recencia_media'], decimais=0)} dias
-   - Clientes Inativos (> 60 dias): {int(rfm['qtd_inativos_60d'])} ({formata_br(pct_inativos, decimais=1)}%)
-   - Frequência Média de Compras: {formata_br(rfm['frequencia_media'], decimais=2)} pedidos/cliente
-
-3. PARECER E PRESCRIÇÕES GERENCIAIS:
-   - Reativação: {"Prioridade Alta (Conceder até 10% com cupom)" if pct_inativos > 30 else "Foco em Onboarding (Desconto suave de 5%)"}
-   - Política de Preços: {"Restringir descontos e focar em Frete Grátis acima de AOV" if margem_pct < 35 else "Liberdade para ações de Cross-Selling"}
-   - Governança: Obrigatória simulação "What-If" no SAD com validação de ROI mínimo.
-
-====================================================
-Sistema de Apoio à Decisão (SAD) - TheLook E-commerce
-"""
-
-    st.download_button(
-        label="📄 Baixar Relatório Executivo Filtrado (TXT)",
-        data=relatorio_texto,
-        file_name=(
-            f"Relatorio_Executivo_TheLook_{dt_inicio_sel.strftime('%Y%m%d')}_{dt_fim_sel.strftime('%Y%m%d')}.txt"
-        ),
-        mime="text/plain",
-        use_container_width=True,
-    )
+    else:
+        st.warning("Nenhum cliente encontrado para o período de cadastro selecionado.")

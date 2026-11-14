@@ -120,6 +120,15 @@ def renderizar(con):
     st.markdown(
         "Este módulo combina **Clusterização K-Means (k=4)** baseada em **RFM** e um **Simulador Preditivo 'What-If'** com taxa de resposta ajustada por segmento."
     )
+    
+    if "val_tx_conversao" not in st.session_state:
+        st.session_state["val_tx_conversao"] = 12.0
+    if "val_pct_desconto" not in st.session_state:
+        st.session_state["val_pct_desconto"] = 10.0
+    if "val_custo_fixo" not in st.session_state:
+        st.session_state["val_custo_fixo"] = 1000.0
+    if "val_meta_romi" not in st.session_state:
+        st.session_state["val_meta_romi"] = 4.0
 
     df_rfm = carregar_dados_rfm(con)
     if df_rfm.empty:
@@ -315,32 +324,48 @@ def renderizar(con):
             "Taxa Média de Resposta Base (%)",
             1.0,
             40.0,
-            12.0,
-            0.5,
+            value=st.session_state["val_tx_conversao"],
+            step=0.5,
+            key="input_tx_conversao",
+            on_change=lambda: st.session_state.update(
+                {"val_tx_conversao": st.session_state["input_tx_conversao"]}
+            ),
             help="Taxa base de resposta. O modelo ajusta a conversão de cada cluster pela recência média do segmento.",
         )
         pct_desconto = st.slider(
             "Desconto Promocional (%)",
             0.0,
             30.0,
-            10.0,
-            1.0,
+            value=st.session_state["val_pct_desconto"],
+            step=1.0,
+            key="input_pct_desconto",
+            on_change=lambda: st.session_state.update(
+                {"val_pct_desconto": st.session_state["input_pct_desconto"]}
+            ),
             help="Desconto concedido sobre o valor do produto.",
         )
         custo_fixo = st.number_input(
             "Custo Fixo por Segmento (US$)",
             0.0,
             50000.0,
-            1000.0,
-            100.0,
+            value=st.session_state["val_custo_fixo"],
+            step=100.0,
+            key="input_custo_fixo",
+            on_change=lambda: st.session_state.update(
+                {"val_custo_fixo": st.session_state["input_custo_fixo"]}
+            ),
             help="Custo fixo de disparo/mídia alocado por segmento.",
         )
         meta_romi = st.slider(
             "Meta de ROMI / Ratio (x:1)",
             1.5,
             10.0,
-            4.0,
-            0.5,
+            value=st.session_state["val_meta_romi"],
+            step=0.5,
+            key="input_meta_romi",
+            on_change=lambda: st.session_state.update(
+                {"val_meta_romi": st.session_state["input_meta_romi"]}
+            ),
             help="Proporção mínima de receita gerada para cada US$ 1 de custo investido.",
         )
 
