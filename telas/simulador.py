@@ -122,13 +122,13 @@ def renderizar(con):
     )
     
     if "val_tx_conversao" not in st.session_state:
-        st.session_state["val_tx_conversao"] = 12.0
+        st.session_state["val_tx_conversao"] = 0.0
     if "val_pct_desconto" not in st.session_state:
-        st.session_state["val_pct_desconto"] = 10.0
+        st.session_state["val_pct_desconto"] = 0.0
     if "val_custo_fixo" not in st.session_state:
-        st.session_state["val_custo_fixo"] = 1000.0
+        st.session_state["val_custo_fixo"] = 0.0
     if "val_meta_romi" not in st.session_state:
-        st.session_state["val_meta_romi"] = 4.0
+        st.session_state["val_meta_romi"] = 0.0
 
     df_rfm = carregar_dados_rfm(con)
     if df_rfm.empty:
@@ -180,13 +180,13 @@ def renderizar(con):
 
     # 2. Gráficos de Caracterização dos Clusters (Eixo X na Ordem Alfabética Explicita)
     st.markdown("#### Perfil Comportamental Médio por Segmento")
-    col_r, col_f, col_m = st.columns(3)
+    col_r, col_f = st.columns(2)
     layout_eixo_x = dict(
         categoryorder="array", categoryarray=ORDEM_ALFABETICA_CLUSTERS
     )
 
     with col_r:
-        st.markdown("**1. Recência Média (Dias sem comprar)**")
+        st.markdown("**Recência Média (Dias sem comprar)**")
         fig_r = px.bar(
             resumo_clusters,
             x="cluster_nome",
@@ -195,7 +195,7 @@ def renderizar(con):
             color_discrete_map=cores_clusters,
         )
         fig_r.update_traces(
-            texttemplate="%{y:.1f}d", textposition="outside", cliponaxis=False
+            texttemplate="%{y:.1f}d", textposition="outside", cliponaxis=False, width=1
         )
         fig_r.update_layout(
             showlegend=False,
@@ -203,12 +203,12 @@ def renderizar(con):
             yaxis_title="Dias",
             xaxis=layout_eixo_x,
             margin=dict(t=20, b=20, l=10, r=10),
-            separators=",.",
+            separators=",."
         )
         st.plotly_chart(fig_r, use_container_width=True)
 
     with col_f:
-        st.markdown("**2. Frequência Média (Nº Pedidos)**")
+        st.markdown("**Frequência Média (Nº Pedidos)**")
         fig_f = px.bar(
             resumo_clusters,
             x="cluster_nome",
@@ -217,7 +217,7 @@ def renderizar(con):
             color_discrete_map=cores_clusters,
         )
         fig_f.update_traces(
-            texttemplate="%{y:.2f}", textposition="outside", cliponaxis=False
+            texttemplate="%{y:.2f}", textposition="outside", cliponaxis=False, width=1
         )
         fig_f.update_layout(
             showlegend=False,
@@ -228,9 +228,11 @@ def renderizar(con):
             separators=",.",
         )
         st.plotly_chart(fig_f, use_container_width=True)
+        
+    col_m, col_pie = st.columns(2)
 
     with col_m:
-        st.markdown("**3. Ticket Médio (Valor p/ Pedido)**")
+        st.markdown("**Ticket Médio (Valor p/ Pedido)**")
         fig_m = px.bar(
             resumo_clusters,
             x="cluster_nome",
@@ -239,7 +241,7 @@ def renderizar(con):
             color_discrete_map=cores_clusters,
         )
         fig_m.update_traces(
-            texttemplate="US$ %{y:.1f}", textposition="outside", cliponaxis=False
+            texttemplate="US$ %{y:.1f}", textposition="outside", cliponaxis=False, width=1
         )
         fig_m.update_layout(
             showlegend=False,
@@ -250,9 +252,6 @@ def renderizar(con):
             separators=",.",
         )
         st.plotly_chart(fig_m, use_container_width=True)
-
-    # 3. Pizza de Faturamento e Tabela Resumo
-    col_pie, col_tab = st.columns([0.7, 1.3])
 
     with col_pie:
         st.markdown("**Participação no Faturamento Total**")
@@ -266,46 +265,45 @@ def renderizar(con):
         )
         fig_pie.update_traces(textinfo="percent+label", textposition="inside")
         fig_pie.update_layout(
-            height=260,
             showlegend=False,
             margin=dict(t=10, b=10, l=10, r=10),
             separators=",.",
         )
         st.plotly_chart(fig_pie, use_container_width=True)
 
-    with col_tab:
-        st.markdown("**📋 Comparativo Detalhado por Segmento**")
-        df_trans = resumo_clusters.copy()
-        df_trans["Total de Clientes"] = df_trans["Total_Clientes"].apply(
-            lambda x: formata_br(x, decimais=0)
-        )
-        df_trans["Recência Média (Dias)"] = df_trans["Recencia_Media"].apply(
-            lambda x: formata_br(x, decimais=1)
-        )
-        df_trans["Frequência Média (Pedidos)"] = df_trans[
-            "Frequencia_Media"
-        ].apply(lambda x: formata_br(x, decimais=2))
-        df_trans["Ticket Médio"] = df_trans["Ticket_Medio"].apply(
-            lambda x: formata_br(x, prefixo="US$ ")
-        )
-        df_trans["Receita Total"] = df_trans["Valor_Total"].apply(
-            lambda x: formata_br(x, prefixo="US$ ")
-        )
-        df_trans["Lucro Total"] = df_trans["Lucro_Total"].apply(
-            lambda x: formata_br(x, prefixo="US$ ")
-        )
+    # with col_tab:
+    #     st.markdown("**📋 Comparativo Detalhado por Segmento**")
+    #     df_trans = resumo_clusters.copy()
+    #     df_trans["Total de Clientes"] = df_trans["Total_Clientes"].apply(
+    #         lambda x: formata_br(x, decimais=0)
+    #     )
+    #     df_trans["Recência Média (Dias)"] = df_trans["Recencia_Media"].apply(
+    #         lambda x: formata_br(x, decimais=1)
+    #     )
+    #     df_trans["Frequência Média (Pedidos)"] = df_trans[
+    #         "Frequencia_Media"
+    #     ].apply(lambda x: formata_br(x, decimais=2))
+    #     df_trans["Ticket Médio"] = df_trans["Ticket_Medio"].apply(
+    #         lambda x: formata_br(x, prefixo="US$ ")
+    #     )
+    #     df_trans["Receita Total"] = df_trans["Valor_Total"].apply(
+    #         lambda x: formata_br(x, prefixo="US$ ")
+    #     )
+    #     df_trans["Lucro Total"] = df_trans["Lucro_Total"].apply(
+    #         lambda x: formata_br(x, prefixo="US$ ")
+    #     )
 
-        tabela_final = df_trans.set_index("cluster_nome")[
-            [
-                "Total de Clientes",
-                "Recência Média (Dias)",
-                "Frequência Média (Pedidos)",
-                "Ticket Médio",
-                "Receita Total",
-                "Lucro Total",
-            ]
-        ].T
-        st.dataframe(tabela_final, use_container_width=True)
+    #     tabela_final = df_trans.set_index("cluster_nome")[
+    #         [
+    #             "Total de Clientes",
+    #             "Recência Média (Dias)",
+    #             "Frequência Média (Pedidos)",
+    #             "Ticket Médio",
+    #             "Receita Total",
+    #             "Lucro Total",
+    #         ]
+    #     ].T
+    #     st.dataframe(tabela_final, use_container_width=True)
 
     # ====================================================
     # SEÇÃO 2: SIMULADOR PREDITIVO (EXIBIÇÃO NA MESMA ORDEM)
@@ -322,8 +320,8 @@ def renderizar(con):
         st.subheader("🛠️ Parâmetros da Simulação")
         tx_conversao_base = st.slider(
             "Taxa Média de Resposta Base (%)",
-            1.0,
-            40.0,
+            0.0,
+            100.0,
             value=st.session_state["val_tx_conversao"],
             step=0.5,
             key="input_tx_conversao",
@@ -335,9 +333,9 @@ def renderizar(con):
         pct_desconto = st.slider(
             "Desconto Promocional (%)",
             0.0,
-            30.0,
+            100.0,
             value=st.session_state["val_pct_desconto"],
-            step=1.0,
+            step=5.0,
             key="input_pct_desconto",
             on_change=lambda: st.session_state.update(
                 {"val_pct_desconto": st.session_state["input_pct_desconto"]}
@@ -347,9 +345,9 @@ def renderizar(con):
         custo_fixo = st.number_input(
             "Custo Fixo por Segmento (US$)",
             0.0,
-            50000.0,
+            1000000.0,
             value=st.session_state["val_custo_fixo"],
-            step=100.0,
+            step=1000.0,
             key="input_custo_fixo",
             on_change=lambda: st.session_state.update(
                 {"val_custo_fixo": st.session_state["input_custo_fixo"]}
@@ -358,7 +356,7 @@ def renderizar(con):
         )
         meta_romi = st.slider(
             "Meta de ROMI / Ratio (x:1)",
-            1.5,
+            0.0,
             10.0,
             value=st.session_state["val_meta_romi"],
             step=0.5,
@@ -367,6 +365,29 @@ def renderizar(con):
                 {"val_meta_romi": st.session_state["input_meta_romi"]}
             ),
             help="Proporção mínima de receita gerada para cada US$ 1 de custo investido.",
+        )
+        
+        # ==============================================================================
+        # BOTÃO PARA RESETAR TODOS OS PARÂMETROS PARA ZERO
+            # ==============================================================================
+        def resetar_parametros_simulacao():
+            st.session_state["val_tx_conversao"] = 0.0
+            st.session_state["val_pct_desconto"] = 0.0
+            st.session_state["val_custo_fixo"] = 0.0
+            st.session_state["val_meta_romi"] = 0.0
+            
+            for key in [
+                "input_tx_conversao",
+                "input_pct_desconto",
+                "input_custo_fixo",
+                "input_meta_romi",
+            ]:
+                if key in st.session_state:
+                    st.session_state[key] = 0.0
+            
+        st.button(
+            "🔄 Resetar Parâmetros",
+            on_click=resetar_parametros_simulacao,
         )
 
     with col_sim2:
@@ -509,9 +530,36 @@ def renderizar(con):
                     },
                     title=f"Demonstrativo do Resultado Simulado: {res['segmento']}",
                 )
+                fig_sim.update_traces(
+                    texttemplate="US$ %{y:,.2f}", textposition="outside", cliponaxis=False, width=1
+                )
                 fig_sim.update_layout(
                     height=240,
                     showlegend=False,
                     margin=dict(l=20, r=20, t=35, b=20),
                 )
                 st.plotly_chart(fig_sim, use_container_width=True)
+    
+    # ==============================================================================
+    # DIRECIONADOR PARA O RELATÓRIO ANALÍTICO DOS CLUSTERS
+    # ==============================================================================
+    st.markdown("---")
+    # Caixa destacada para chamar a atenção do usuário
+    with st.container(border=True):
+        col_txt, col_btn = st.columns([2.2, 1])
+        with col_txt:
+            st.markdown(
+                "### 📊 **Quer consultar os dados detalhados em tabela ou exportar para Excel?**"
+            )
+            st.caption(
+                "Acesse o Parecer da Simulação e o Analítico Geral de Clusters na tela de Relatórios."
+            )
+        with col_btn:
+            st.write("")  # Espaçador vertical para alinhar com o título
+            if st.button(
+                "📄 Ver Analítico & Exportar",
+                type="primary",
+                use_container_width=True,
+            ):
+                st.session_state.pagina = "relatorio"
+                st.rerun()

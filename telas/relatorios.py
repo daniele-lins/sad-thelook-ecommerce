@@ -251,16 +251,16 @@ def renderizar(con):
 
     # Recupera parâmetros salvos do simulador (prioriza chaves persistentes val_*)
     tx_base = st.session_state.get(
-        "val_tx_conversao", st.session_state.get("sim_tx_conversao", 12.0)
+        "val_tx_conversao", st.session_state.get("sim_tx_conversao", 0.0)
     )
     desc_prom = st.session_state.get(
-        "val_pct_desconto", st.session_state.get("sim_pct_desconto", 10.0)
+        "val_pct_desconto", st.session_state.get("sim_pct_desconto", 0.0)
     )
     custo_fx = st.session_state.get(
-        "val_custo_fixo", st.session_state.get("sim_custo_fixo", 1000.0)
+        "val_custo_fixo", st.session_state.get("sim_custo_fixo", 0.0)
     )
     romi_meta = st.session_state.get(
-        "val_meta_romi", st.session_state.get("sim_meta_romi", 4.0)
+        "val_meta_romi", st.session_state.get("sim_meta_romi", 0.0)
     )
 
     # Dicionário formatado com a função formata_br
