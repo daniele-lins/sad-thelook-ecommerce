@@ -23,20 +23,26 @@ def formata_br(valor, prefixo="", sufixo="", decimais=2):
 def gerar_excel_com_observacao(df_dados, parametros_dict):
     """
     Gera um arquivo .xlsx em memória contendo a tabela consolidada (baseline + simulação)
-    e adiciona a linha de observação dos parâmetros no rodapé.
+    e adiciona a linha de observação dos parâmetros na primeira linha (célula A1).
     """
     buffer = io.BytesIO()
+
     # Prepara o texto formatado dos parâmetros
     texto_params = "Parâmetros utilizados na simulação: " + "; ".join(
         [f"{k} = {v}" for k, v in parametros_dict.items()]
     )
 
     df_export = df_dados.copy()
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_export.to_excel(writer, sheet_name="Simulacao_Clusters", index=False)
+        # Exporta a tabela começando na linha 3 (startrow=2 em 0-index)
+        df_export.to_excel(
+            writer, sheet_name="Simulacao_Clusters", index=False, startrow=2
+        )
         worksheet = writer.sheets["Simulacao_Clusters"]
-        linha_rodape = len(df_export) + 3  # Deixa uma linha em branco antes do rodapé
-        worksheet.cell(row=linha_rodape, column=1, value=texto_params)
+
+        # Insere a descrição dos parâmetros na célula A1 (linha 1, coluna 1)
+        worksheet.cell(row=1, column=1, value=texto_params)
 
     buffer.seek(0)
     return buffer
@@ -243,38 +249,53 @@ def renderizar(con):
         df_1a_display = pd.DataFrame(
             {
                 "Segmento (Cluster)": resumo_clusters["cluster_nome"],
-                "Total de Clientes": resumo_clusters["Total_Clientes"].apply(
-                    lambda x: formata_br(x, decimais=0)
-                ),
-                "Recência Média (Dias)": resumo_clusters["Recencia_Media"].apply(
-                    lambda x: formata_br(x, decimais=1)
-                ),
-                "Frequência Média (Pedidos)": resumo_clusters["Frequencia_Media"].apply(
-                    lambda x: formata_br(x, decimais=2)
-                ),
-                "Ticket Médio (US$)": resumo_clusters["Ticket_Medio"].apply(
-                    lambda x: formata_br(x, decimais=2)
-                ),
-                "Receita Total (US$)": resumo_clusters["Valor_Total"].apply(
-                    lambda x: formata_br(x, decimais=2)
-                ),
-                "Lucro Total (US$)": resumo_clusters["Lucro_Total"].apply(
-                    lambda x: formata_br(x, decimais=2)
-                ),
+                "Total de Clientes": resumo_clusters["Total_Clientes"],
+                "Recência Média (Dias)": resumo_clusters["Recencia_Media"].round(1),
+                "Frequência Média (Pedidos)": resumo_clusters["Frequencia_Media"].round(2),
+                "Ticket Médio (US$)": resumo_clusters["Ticket_Medio"].round(2),
+                "Receita Total (US$)": resumo_clusters["Valor_Total"].round(2),
+                "Lucro Total (US$)": resumo_clusters["Lucro_Total"].round(2),
             }
         )
-        st.dataframe(df_1a_display, use_container_width=True, hide_index=True)
 
-        # Tabela 1B: Resultado Simulado por Cluster Formatado em PT-BR
+        st.dataframe(
+            df_1a_display,
+            column_config={
+                "Segmento (Cluster)": st.column_config.TextColumn("Segmento (Cluster)"),
+                "Total de Clientes": st.column_config.NumberColumn(
+                    "Total de Clientes", format="%d"
+                ),
+                "Recência Média (Dias)": st.column_config.NumberColumn(
+                    "Recência Média (Dias)", format="%.1f"
+                ),
+                "Frequência Média (Pedidos)": st.column_config.NumberColumn(
+                    "Frequência Média (Pedidos)", format="%.2f"
+                ),
+                "Ticket Médio (US$)": st.column_config.NumberColumn(
+                    "Ticket Médio (US$)", format="$ %.2f"
+                ),
+                "Receita Total (US$)": st.column_config.NumberColumn(
+                    "Receita Total (US$)", format="$ %.2f"
+                ),
+                "Lucro Total (US$)": st.column_config.NumberColumn(
+                    "Lucro Total (US$)", format="$ %.2f"
+                ),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # Tabela 1B: Resultado Simulado por Cluster
         st.markdown("##### 🚀 Resultado Simulado por Segmento")
         recencia_global = df_clustered["recencia"].mean()
+
+        # 1. As listas DEVEM ser criadas FORA do laço for (antes dele começar)
         dados_simulados_display = []
         dados_consolidados_excel = []
 
         for _, row_cluster in resumo_clusters.iterrows():
             seg = str(row_cluster["cluster_nome"])
             df_target = df_clustered[df_clustered["cluster_nome"] == seg]
-
             n_clientes = len(df_target)
             ticket_medio = row_cluster["Ticket_Medio"]
             custo_prod = df_target["custo_medio_produto"].mean()
@@ -284,12 +305,11 @@ def renderizar(con):
             fator_recencia = np.exp(-0.5 * (recencia_seg / recencia_global))
             fator_promocional = 1.0 + (desc_prom / 100.0) * 1.2
             taxa_conversao_efetiva = min(tx_base * fator_recencia * fator_promocional, 50.0)
-
             clientes_impactados = int(n_clientes * (taxa_conversao_efetiva / 100.0))
+
             receita_bruta = clientes_impactados * ticket_medio
             custo_desconto = receita_bruta * (desc_prom / 100.0)
             custo_total = custo_desconto + custo_fx
-
             lucro_bruto = clientes_impactados * (ticket_medio - custo_prod)
             lucro_liquido = lucro_bruto - custo_total
             ratio_receita = (receita_bruta / custo_total) if custo_total > 0 else 0.0
@@ -301,72 +321,77 @@ def renderizar(con):
             else:
                 diag = "Ruim"
 
-            # Tabela 1B exibida em tela
+            # Registra na lista da tela (apenas o .append fica dentro do for)
             dados_simulados_display.append(
                 {
                     "Segmento (Cluster)": seg,
-                    "Taxa Resposta Efetiva (%)": formata_br(
-                        taxa_conversao_efetiva, decimais=1
-                    ),
-                    "Clientes Convertidos": formata_br(clientes_impactados, decimais=0),
-                    "Receita Projetada (US$)": formata_br(
-                        receita_bruta, decimais=2
-                    ),
-                    "Custo Total (US$)": formata_br(custo_total, decimais=2),
-                    "Lucro Líquido Proj. (US$)": formata_br(
-                        lucro_liquido, decimais=2
-                    ),
-                    "ROMI (x:1)": formata_br(ratio_receita, decimais=2),
+                    "Taxa Resposta Efetiva (%)": round(taxa_conversao_efetiva, 1),
+                    "Clientes Convertidos": clientes_impactados,
+                    "Receita Projetada (US$)": round(receita_bruta, 2),
+                    "Custo Total (US$)": round(custo_total, 2),
+                    "Lucro Líquido Proj. (US$)": round(lucro_liquido, 2),
+                    "ROMI (x:1)": round(ratio_receita, 2),
                     "Diagnóstico": diag,
                 }
             )
 
-            # UNIFICA BASELINE + SIMULAÇÃO NA MESMA LINHA PARA O EXCEL
+            # Registra na lista do Excel (apenas o .append fica dentro do for)
             dados_consolidados_excel.append(
                 {
                     "Segmento (Cluster)": seg,
-                    "Total de Clientes (Atual)": formata_br(n_clientes, decimais=0),
-                    "Recência Média (Dias)": formata_br(recencia_seg, decimais=1, sufixo="d"),
-                    "Frequência Média (Pedidos)": formata_br(
-                        row_cluster["Frequencia_Media"], decimais=2
-                    ),
-                    "Ticket Médio (US$)": formata_br(ticket_medio, prefixo="US$ ", decimais=2),
-                    "Receita Histórica Total (US$)": formata_br(
-                        row_cluster["Valor_Total"], prefixo="US$ ", decimais=2
-                    ),
-                    "Lucro Histórico Total (US$)": formata_br(
-                        row_cluster["Lucro_Total"], prefixo="US$ ", decimais=2
-                    ),
-                    "Taxa Resposta Efetiva (%)": formata_br(
-                        taxa_conversao_efetiva, sufixo="%", decimais=1
-                    ),
-                    "Clientes Convertidos (Simulado)": formata_br(clientes_impactados, decimais=0),
-                    "Receita Projetada (US$)": formata_br(
-                        receita_bruta, prefixo="US$ ", decimais=2
-                    ),
-                    "Custo Total Simulado (US$)": formata_br(
-                        custo_total, prefixo="US$ ", decimais=2
-                    ),
-                    "Lucro Líquido Proj. (US$)": formata_br(
-                        lucro_liquido, prefixo="US$ ", decimais=2
-                    ),
-                    "ROMI (x:1)": formata_br(ratio_receita, sufixo=":1", decimais=2),
+                    "Total de Clientes (Atual)": int(n_clientes),
+                    "Recência Média (Dias)": round(float(recencia_seg), 1),
+                    "Frequência Média (Pedidos)": round(float(row_cluster["Frequencia_Media"]), 2),
+                    "Ticket Médio (US$)": round(float(ticket_medio), 2),
+                    "Receita Histórica Total (US$)": round(float(row_cluster["Valor_Total"]), 2),
+                    "Lucro Histórico Total (US$)": round(float(row_cluster["Lucro_Total"]), 2),
+                    "Taxa Resposta Efetiva (%)": round(float(taxa_conversao_efetiva), 1),
+                    "Clientes Convertidos (Simulado)": int(clientes_impactados),
+                    "Receita Projetada (US$)": round(float(receita_bruta), 2),
+                    "Custo Total Simulado (US$)": round(float(custo_total), 2),
+                    "Lucro Líquido Proj. (US$)": round(float(lucro_liquido), 2),
+                    "ROMI (x:1)": round(float(ratio_receita), 2),
                     "Diagnóstico": diag,
                 }
             )
 
+        # 2. A exibição no Streamlit e a exportação para Excel DEVEM ficar FORA do laço for
         df_simulacao_resultado = pd.DataFrame(dados_simulados_display)
-        st.dataframe(df_simulacao_resultado, use_container_width=True, hide_index=True)
+        st.dataframe(
+            df_simulacao_resultado,
+            column_config={
+                "Segmento (Cluster)": st.column_config.TextColumn("Segmento (Cluster)"),
+                "Taxa Resposta Efetiva (%)": st.column_config.NumberColumn(
+                    "Taxa Resposta Efetiva (%)", format="%.1f %%"
+                ),
+                "Clientes Convertidos": st.column_config.NumberColumn(
+                    "Clientes Convertidos", format="%d"
+                ),
+                "Receita Projetada (US$)": st.column_config.NumberColumn(
+                    "Receita Projetada (US$)", format="$ %.2f"
+                ),
+                "Custo Total (US$)": st.column_config.NumberColumn(
+                    "Custo Total (US$)", format="$ %.2f"
+                ),
+                "Lucro Líquido Proj. (US$)": st.column_config.NumberColumn(
+                    "Lucro Líquido Proj. (US$)", format="$ %.2f"
+                ),
+                "ROMI (x:1)": st.column_config.NumberColumn(
+                    "ROMI (x:1)", format="%.2f"
+                ),
+                "Diagnóstico": st.column_config.TextColumn("Diagnóstico"),
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
 
-        # DataFrame Consolidado unificando as duas tabelas
+        # DataFrame Consolidado e Exportação para Excel
         df_consolidado_excel = pd.DataFrame(dados_consolidados_excel)
-
-        # Botão de Exportação do Excel Unificado
         excel_bytes = gerar_excel_com_observacao(df_consolidado_excel, dict_params)
         st.download_button(
             label="📥 Exportar em Excel (.xlsx)",
             data=excel_bytes,
-            file_name="relatorio_simulacao_clusters_completo.xlsx",
+            file_name="simulacao_clusters.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
@@ -539,8 +564,7 @@ def renderizar(con):
                     ),
                 )
 
-                st.markdown("---")
-                if st.button("🔄 Resetar Filtros", use_container_width=True):
+                if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_e"):
                     st.session_state["saved_filter_pais"] = []
                     st.session_state["saved_filter_estado"] = []
                     st.session_state["saved_filter_cidade"] = []
@@ -834,8 +858,7 @@ def renderizar(con):
                     ),
                 )
 
-                st.markdown("---")
-                if st.button("🔄 Resetar Filtros (Pedidos)", use_container_width=True):
+                if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_p"):
                     for k in chaves_pedidos:
                         st.session_state[k] = []
                         w_key = k.replace("saved_", "widget_")
@@ -1115,8 +1138,7 @@ def renderizar(con):
                     ),
                 )
 
-                st.markdown("---")
-                if st.button("🔄 Resetar Filtros (Clientes)", use_container_width=True):
+                if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_c"):
                     for k in chaves_clientes:
                         st.session_state[k] = []
                         w_key = k.replace("saved_", "widget_")
