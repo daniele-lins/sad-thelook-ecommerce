@@ -27,7 +27,6 @@ def gerar_excel_com_observacao(df_dados, parametros_dict):
     """
     buffer = io.BytesIO()
 
-    # Prepara o texto formatado dos parâmetros
     texto_params = "Parâmetros utilizados na simulação: " + "; ".join(
         [f"{k} = {v}" for k, v in parametros_dict.items()]
     )
@@ -35,17 +34,15 @@ def gerar_excel_com_observacao(df_dados, parametros_dict):
     df_export = df_dados.copy()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        # Exporta a tabela começando na linha 3 (startrow=2 em 0-index)
         df_export.to_excel(
             writer, sheet_name="Simulacao_Clusters", index=False, startrow=2
         )
         worksheet = writer.sheets["Simulacao_Clusters"]
-
-        # Insere a descrição dos parâmetros na célula A1 (linha 1, coluna 1)
         worksheet.cell(row=1, column=1, value=texto_params)
 
     buffer.seek(0)
     return buffer
+
 
 def gerar_excel(df_dados, texto_filtros, nome_aba="Dados"):
     """
@@ -57,7 +54,6 @@ def gerar_excel(df_dados, texto_filtros, nome_aba="Dados"):
     buffer = io.BytesIO()
     df_export = df_dados.copy()
 
-    # Formata automaticamente QUALQUER coluna do tipo datetime/data
     for col in df_export.columns:
         if pd.api.types.is_datetime64_any_dtype(df_export[col]):
             df_export[col] = df_export[col].dt.strftime("%d/%m/%Y")
@@ -77,20 +73,67 @@ def gerar_excel(df_dados, texto_filtros, nome_aba="Dados"):
     buffer.seek(0)
     return buffer
 
+
+def gerar_excel_relatorio_completo(
+    df_clusters_excel, texto_params,
+    df_eventos_filtrado, texto_eventos_a1,
+    df_pedidos_filtrado, texto_pedidos_a1,
+    df_clientes_filtrado, texto_clientes_a1,
+):
+    """
+    Gera um único arquivo .xlsx com 4 abas, preservando os DataFrames filtrados
+    em tela e registrando os filtros aplicados na célula A1 de cada aba.
+    """
+    buffer = io.BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        # Aba 1: Clusters e Simulação
+        if df_clusters_excel is not None and not df_clusters_excel.empty:
+            df_clusters_excel.to_excel(
+                writer, sheet_name="Simulacao_Clusters", index=False, startrow=2
+            )
+            ws1 = writer.sheets["Simulacao_Clusters"]
+            ws1.cell(row=1, column=1, value=texto_params)
+
+        # Aba 2: Tráfego (Eventos)
+        if df_eventos_filtrado is not None and not df_eventos_filtrado.empty:
+            df_eventos_filtrado.to_excel(
+                writer, sheet_name="Trafego", index=False, startrow=2
+            )
+            ws2 = writer.sheets["Trafego"]
+            ws2.cell(row=1, column=1, value=texto_eventos_a1)
+
+        # Aba 3: Vendas
+        if df_pedidos_filtrado is not None and not df_pedidos_filtrado.empty:
+            df_pedidos_filtrado.to_excel(
+                writer, sheet_name="Vendas", index=False, startrow=2
+            )
+            ws3 = writer.sheets["Vendas"]
+            ws3.cell(row=1, column=1, value=texto_pedidos_a1)
+
+        # Aba 4: Clientes
+        if df_clientes_filtrado is not None and not df_clientes_filtrado.empty:
+            df_clientes_filtrado.to_excel(
+                writer, sheet_name="Clientes", index=False, startrow=2
+            )
+            ws4 = writer.sheets["Clientes"]
+            ws4.cell(row=1, column=1, value=texto_clientes_a1)
+
+    buffer.seek(0)
+    return buffer
+
+
 @st.cache_data(show_spinner="Carregando dados de tráfego...")
 def buscar_dados_eventos(_con, data_inicio, data_fim):
-    """
-    Executa a query de eventos e armazena o resultado em cache.
-    Só reexecuta no DuckDB se as datas inicial ou final mudarem.
-    """
     query = f"""
         WITH mapa_localizacao AS (
-            SELECT DISTINCT city, state, country 
-            FROM users 
-            WHERE country IS NOT NULL AND LOWER(country) != 'não informado'
+            SELECT DISTINCT city, state, country
+            FROM users
+            WHERE country IS NOT NULL 
+              AND LOWER(country) != 'não informado'
         )
         SELECT 
-            TRY_CAST(e.created_at AS date) AS "Data do Evento",
+            TRY_CAST(e.created_at AS DATE) AS "Data do Evento",
             CASE e.event_type
                 WHEN 'home' THEN 'Página Inicial'
                 WHEN 'department' THEN 'Departamento'
@@ -99,7 +142,7 @@ def buscar_dados_eventos(_con, data_inicio, data_fim):
                 WHEN 'purchase' THEN 'Compra'
                 WHEN 'cancel' THEN 'Cancelamento'
                 ELSE e.event_type
-            END as "Etapa",
+            END AS "Etapa",
             e.traffic_source AS "Origem do Tráfego",
             COALESCE(
                 (SELECT ANY_VALUE(m.country) FROM mapa_localizacao m WHERE m.state = e.state AND m.city = e.city),
@@ -109,14 +152,15 @@ def buscar_dados_eventos(_con, data_inicio, data_fim):
             ) AS "País",
             COALESCE(e.state, 'Não Informado') AS "Estado",
             COALESCE(e.city, 'Não Informado') AS "Cidade",
-            COUNT(DISTINCT e.session_id) as "Sessões",
-            COUNT(DISTINCT e.user_id) as "Usuários"
+            COUNT(DISTINCT e.session_id) AS "Sessões",
+            COUNT(DISTINCT e.user_id) AS "Usuários"
         FROM events e
         WHERE TRY_CAST(e.created_at AS DATE) BETWEEN '{data_inicio}' AND '{data_fim}'
         GROUP BY ALL
         ORDER BY 1 DESC
     """
     return _con.execute(query).df()
+
 
 @st.cache_data(show_spinner="Carregando dados de pedidos...")
 def buscar_dados_pedidos(_con, data_inicio, data_fim):
@@ -145,6 +189,7 @@ def buscar_dados_pedidos(_con, data_inicio, data_fim):
         ORDER BY "Data do Pedido" DESC
     """
     return _con.execute(query).df()
+
 
 @st.cache_data(show_spinner="Carregando dados de clientes...")
 def buscar_dados_clientes(_con, data_inicio, data_fim):
@@ -179,17 +224,29 @@ def buscar_dados_clientes(_con, data_inicio, data_fim):
     """
     return _con.execute(query).df()
 
+
 def renderizar(con):
     st.title("📊 Relatórios Analíticos")
     st.caption(
         "Consolidação estratégica de segmentação, simulações, tráfego web, vendas e perfil de clientes."
     )
 
+    # 1. Inicializa variáveis de relatório com valores padrão no escopo da função
+    texto_params = "Parâmetros utilizados na simulação: Padrão"
+    texto_eventos_a1 = "Filtros aplicados: Período completo"
+    texto_pedidos_a1 = "Filtros aplicados: Período completo"
+    texto_clientes_a1 = "Filtros aplicados: Período completo"
+
+    df_consolidado_excel = pd.DataFrame()
+    df_eventos_filtrado = pd.DataFrame()
+    df_pedidos_filtrado = pd.DataFrame()
+    df_clientes_filtrado = pd.DataFrame()
+
     # ==============================================================================
     # PARTE 1: SEGMENTAÇÃO DE CLIENTES & PARECER DA ÚLTIMA SIMULAÇÃO
     # ==============================================================================
     st.markdown("---")
-    st.subheader("🎯 Parecer da Simulação e Diagnóstico de Clusters")
+    st.subheader("🎯 Parecer da Simulação e Diagnóstico dos Clusters")
 
     # Recupera parâmetros salvos do simulador (prioriza chaves persistentes val_*)
     tx_base = st.session_state.get(
@@ -213,6 +270,11 @@ def renderizar(con):
         "Meta de ROMI (x:1)": formata_br(romi_meta, sufixo=":1", decimais=1),
     }
 
+    # ATUALIZA texto_params PARA O RELATÓRIO CONSOLIDADO
+    texto_params = "Parâmetros utilizados na simulação: " + "; ".join(
+        [f"{k} = {v}" for k, v in dict_params.items()]
+    )
+
     st.markdown("##### ⚙️ Parâmetros Utilizados na Última Simulação")
     col_p1, col_p2, col_p3, col_p4 = st.columns(4)
     col_p1.metric("Taxa Resposta Base", dict_params["Taxa Média de Resposta Base (%)"])
@@ -226,7 +288,6 @@ def renderizar(con):
     if not df_rfm.empty:
         df_clustered = aplicar_kmeans(df_rfm, n_clusters=4)
 
-        # Resumo baseline idêntico ao simulador.py
         resumo_clusters = (
             df_clustered.groupby("cluster_nome", observed=False)
             .agg(
@@ -244,7 +305,7 @@ def renderizar(con):
             .sort_values("cluster_nome")
         )
 
-        # Tabela 1A: Baseline K-Means Formatada em PT-BR
+        # Tabela 1A: Baseline K-Means
         st.markdown("##### 📋 Dados Atuais dos Segmentos")
         df_1a_display = pd.DataFrame(
             {
@@ -262,24 +323,12 @@ def renderizar(con):
             df_1a_display,
             column_config={
                 "Segmento (Cluster)": st.column_config.TextColumn("Segmento (Cluster)"),
-                "Total de Clientes": st.column_config.NumberColumn(
-                    "Total de Clientes", format="%d"
-                ),
-                "Recência Média (Dias)": st.column_config.NumberColumn(
-                    "Recência Média (Dias)", format="%.1f"
-                ),
-                "Frequência Média (Pedidos)": st.column_config.NumberColumn(
-                    "Frequência Média (Pedidos)", format="%.2f"
-                ),
-                "Ticket Médio (US$)": st.column_config.NumberColumn(
-                    "Ticket Médio (US$)", format="$ %.2f"
-                ),
-                "Receita Total (US$)": st.column_config.NumberColumn(
-                    "Receita Total (US$)", format="$ %.2f"
-                ),
-                "Lucro Total (US$)": st.column_config.NumberColumn(
-                    "Lucro Total (US$)", format="$ %.2f"
-                ),
+                "Total de Clientes": st.column_config.NumberColumn("Total de Clientes", format="%d"),
+                "Recência Média (Dias)": st.column_config.NumberColumn("Recência Média (Dias)", format="%.1f"),
+                "Frequência Média (Pedidos)": st.column_config.NumberColumn("Frequência Média (Pedidos)", format="%.2f"),
+                "Ticket Médio (US$)": st.column_config.NumberColumn("Ticket Médio (US$)", format="$ %.2f"),
+                "Receita Total (US$)": st.column_config.NumberColumn("Receita Total (US$)", format="$ %.2f"),
+                "Lucro Total (US$)": st.column_config.NumberColumn("Lucro Total (US$)", format="$ %.2f"),
             },
             use_container_width=True,
             hide_index=True,
@@ -289,7 +338,6 @@ def renderizar(con):
         st.markdown("##### 🚀 Resultado Simulado por Segmento")
         recencia_global = df_clustered["recencia"].mean()
 
-        # 1. As listas DEVEM ser criadas FORA do laço for (antes dele começar)
         dados_simulados_display = []
         dados_consolidados_excel = []
 
@@ -301,7 +349,6 @@ def renderizar(con):
             custo_prod = df_target["custo_medio_produto"].mean()
             recencia_seg = row_cluster["Recencia_Media"]
 
-            # Fórmulas de resposta e simulação do modelo
             fator_recencia = np.exp(-0.5 * (recencia_seg / recencia_global))
             fator_promocional = 1.0 + (desc_prom / 100.0) * 1.2
             taxa_conversao_efetiva = min(tx_base * fator_recencia * fator_promocional, 50.0)
@@ -321,7 +368,6 @@ def renderizar(con):
             else:
                 diag = "Ruim"
 
-            # Registra na lista da tela (apenas o .append fica dentro do for)
             dados_simulados_display.append(
                 {
                     "Segmento (Cluster)": seg,
@@ -335,7 +381,6 @@ def renderizar(con):
                 }
             )
 
-            # Registra na lista do Excel (apenas o .append fica dentro do for)
             dados_consolidados_excel.append(
                 {
                     "Segmento (Cluster)": seg,
@@ -355,37 +400,23 @@ def renderizar(con):
                 }
             )
 
-        # 2. A exibição no Streamlit e a exportação para Excel DEVEM ficar FORA do laço for
         df_simulacao_resultado = pd.DataFrame(dados_simulados_display)
         st.dataframe(
             df_simulacao_resultado,
             column_config={
                 "Segmento (Cluster)": st.column_config.TextColumn("Segmento (Cluster)"),
-                "Taxa Resposta Efetiva (%)": st.column_config.NumberColumn(
-                    "Taxa Resposta Efetiva (%)", format="%.1f %%"
-                ),
-                "Clientes Convertidos": st.column_config.NumberColumn(
-                    "Clientes Convertidos", format="%d"
-                ),
-                "Receita Projetada (US$)": st.column_config.NumberColumn(
-                    "Receita Projetada (US$)", format="$ %.2f"
-                ),
-                "Custo Total (US$)": st.column_config.NumberColumn(
-                    "Custo Total (US$)", format="$ %.2f"
-                ),
-                "Lucro Líquido Proj. (US$)": st.column_config.NumberColumn(
-                    "Lucro Líquido Proj. (US$)", format="$ %.2f"
-                ),
-                "ROMI (x:1)": st.column_config.NumberColumn(
-                    "ROMI (x:1)", format="%.2f"
-                ),
+                "Taxa Resposta Efetiva (%)": st.column_config.NumberColumn("Taxa Resposta Efetiva (%)", format="%.1f %%"),
+                "Clientes Convertidos": st.column_config.NumberColumn("Clientes Convertidos", format="%d"),
+                "Receita Projetada (US$)": st.column_config.NumberColumn("Receita Projetada (US$)", format="$ %.2f"),
+                "Custo Total (US$)": st.column_config.NumberColumn("Custo Total (US$)", format="$ %.2f"),
+                "Lucro Líquido Proj. (US$)": st.column_config.NumberColumn("Lucro Líquido Proj. (US$)", format="$ %.2f"),
+                "ROMI (x:1)": st.column_config.NumberColumn("ROMI (x:1)", format="%.2f"),
                 "Diagnóstico": st.column_config.TextColumn("Diagnóstico"),
             },
             use_container_width=True,
             hide_index=True,
         )
 
-        # DataFrame Consolidado e Exportação para Excel
         df_consolidado_excel = pd.DataFrame(dados_consolidados_excel)
         excel_bytes = gerar_excel_com_observacao(df_consolidado_excel, dict_params)
         st.download_button(
@@ -396,21 +427,20 @@ def renderizar(con):
         )
 
     # ==============================================================================
-    # PARTE 2: ANALÍTICO GERAL DE TRÁFEGO WEB
+    # PARTE 2: ANALÍTICO GERAL DE TRÁFEGO WEB (EVENTOS)
     # ==============================================================================
     st.markdown("---")
-    st.subheader("🌐 Analítico Geral de Tráfego Web")
+    st.subheader("🌐 Analítico Geral de Tráfego Web e Eventos")
     st.caption(
-        "Visão agregada do funil de navegação, origem de tráfego e localização por sessão e usuário."
+        "Mapeamento de acessos, navegação e conversão do funil por localização geográfica e origem do tráfego."
     )
 
-    col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-    with col_f1:
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
         data_inicio_e = st.date_input("Data Inicial", pd.to_datetime("2023-01-01"), format="DD/MM/YYYY", key="data_inicio_e")
-    with col_f2:
+    with col_e2:
         data_fim_e = st.date_input("Data Final", pd.to_datetime("2024-12-31"), format="DD/MM/YYYY", key="data_fim_e")
 
-    # Busca em cache para não recarregar a query em cliques acidentais
     try:
         df_eventos = buscar_dados_eventos(con, data_inicio_e, data_fim_e)
     except Exception:
@@ -418,185 +448,85 @@ def renderizar(con):
 
     if not df_eventos.empty:
         df_eventos["Data do Evento"] = pd.to_datetime(df_eventos["Data do Evento"])
+        colunas_ordem = ["Data do Evento", "País", "Estado", "Cidade", "Etapa", "Origem do Tráfego", "Sessões", "Usuários"]
+        df_eventos = df_eventos[[c for c in colunas_ordem if c in df_eventos.columns]]
 
-        # 1. Inicialização de chaves no session_state para persistência
-        if "saved_filter_pais" not in st.session_state:
-            st.session_state["saved_filter_pais"] = []
-        if "saved_filter_estado" not in st.session_state:
-            st.session_state["saved_filter_estado"] = []
-        if "saved_filter_cidade" not in st.session_state:
-            st.session_state["saved_filter_cidade"] = []
-        if "saved_filter_etapa" not in st.session_state:
-            st.session_state["saved_filter_etapa"] = []
-        if "saved_filter_origem" not in st.session_state:
-            st.session_state["saved_filter_origem"] = []
+        chaves_eventos = ["saved_filter_evt_pais", "saved_filter_evt_est", "saved_filter_evt_cid", "saved_filter_evt_etapa", "saved_filter_evt_origem"]
+        for k in chaves_eventos:
+            if k not in st.session_state:
+                st.session_state[k] = []
 
-        # 2. Leitura dos estados atuais
-        sel_pais_atual = st.session_state["saved_filter_pais"]
-        sel_estado_atual = st.session_state["saved_filter_estado"]
-        sel_cidade_atual = st.session_state["saved_filter_cidade"]
-        sel_etapa_atual = st.session_state["saved_filter_etapa"]
-        sel_origem_atual = st.session_state["saved_filter_origem"]
+        sel_pais_evt_atual = st.session_state["saved_filter_evt_pais"]
+        sel_est_evt_atual = st.session_state["saved_filter_evt_est"]
+        sel_cid_evt_atual = st.session_state["saved_filter_evt_cid"]
+        sel_etapa_evt_atual = st.session_state["saved_filter_evt_etapa"]
+        sel_origem_evt_atual = st.session_state["saved_filter_evt_origem"]
 
-        # 3. Cálculo das Opções Dinâmicas em Cascata
-        df_p = df_eventos.copy()
-        if sel_estado_atual:
-            df_p = df_p[df_p["Estado"].isin(sel_estado_atual)]
-        if sel_cidade_atual:
-            df_p = df_p[df_p["Cidade"].isin(sel_cidade_atual)]
-        if sel_etapa_atual:
-            df_p = df_p[df_p["Etapa"].isin(sel_etapa_atual)]
-        if sel_origem_atual:
-            df_p = df_p[df_p["Origem do Tráfego"].isin(sel_origem_atual)]
-        opcoes_pais = sorted(df_p["País"].dropna().unique().tolist())
+        def filtrar_base_evt(exceto=None):
+            df_temp = df_eventos.copy()
+            if exceto != "pais" and sel_pais_evt_atual:
+                df_temp = df_temp[df_temp["País"].isin(sel_pais_evt_atual)]
+            if exceto != "est" and sel_est_evt_atual:
+                df_temp = df_temp[df_temp["Estado"].isin(sel_est_evt_atual)]
+            if exceto != "cid" and sel_cid_evt_atual:
+                df_temp = df_temp[df_temp["Cidade"].isin(sel_cid_evt_atual)]
+            if exceto != "etapa" and sel_etapa_evt_atual:
+                df_temp = df_temp[df_temp["Etapa"].isin(sel_etapa_evt_atual)]
+            if exceto != "origem" and sel_origem_evt_atual:
+                df_temp = df_temp[df_temp["Origem do Tráfego"].isin(sel_origem_evt_atual)]
+            return df_temp
 
-        df_e = df_eventos.copy()
-        if sel_pais_atual:
-            df_e = df_e[df_e["País"].isin(sel_pais_atual)]
-        if sel_cidade_atual:
-            df_e = df_e[df_e["Cidade"].isin(sel_cidade_atual)]
-        if sel_etapa_atual:
-            df_e = df_e[df_e["Etapa"].isin(sel_etapa_atual)]
-        if sel_origem_atual:
-            df_e = df_e[df_e["Origem do Tráfego"].isin(sel_origem_atual)]
-        opcoes_estado = sorted(df_e["Estado"].dropna().unique().tolist())
+        opcoes_pais_evt = sorted(filtrar_base_evt("pais")["País"].dropna().unique().tolist())
+        opcoes_est_evt = sorted(filtrar_base_evt("est")["Estado"].dropna().unique().tolist())
+        opcoes_cid_evt = sorted(filtrar_base_evt("cid")["Cidade"].dropna().unique().tolist())
+        opcoes_etapa_evt = sorted(filtrar_base_evt("etapa")["Etapa"].dropna().unique().tolist())
+        opcoes_origem_evt = sorted(filtrar_base_evt("origem")["Origem do Tráfego"].dropna().unique().tolist())
 
-        df_c = df_eventos.copy()
-        if sel_pais_atual:
-            df_c = df_c[df_c["País"].isin(sel_pais_atual)]
-        if sel_estado_atual:
-            df_c = df_c[df_c["Estado"].isin(sel_estado_atual)]
-        if sel_etapa_atual:
-            df_c = df_c[df_c["Etapa"].isin(sel_etapa_atual)]
-        if sel_origem_atual:
-            df_c = df_c[df_c["Origem do Tráfego"].isin(sel_origem_atual)]
-        opcoes_cidade = sorted(df_c["Cidade"].dropna().unique().tolist())
+        st.session_state["saved_filter_evt_pais"] = [x for x in st.session_state["saved_filter_evt_pais"] if x in opcoes_pais_evt]
+        st.session_state["saved_filter_evt_est"] = [x for x in st.session_state["saved_filter_evt_est"] if x in opcoes_est_evt]
+        st.session_state["saved_filter_evt_cid"] = [x for x in st.session_state["saved_filter_evt_cid"] if x in opcoes_cid_evt]
+        st.session_state["saved_filter_evt_etapa"] = [x for x in st.session_state["saved_filter_evt_etapa"] if x in opcoes_etapa_evt]
+        st.session_state["saved_filter_evt_origem"] = [x for x in st.session_state["saved_filter_evt_origem"] if x in opcoes_origem_evt]
 
-        df_et = df_eventos.copy()
-        if sel_pais_atual:
-            df_et = df_et[df_et["País"].isin(sel_pais_atual)]
-        if sel_estado_atual:
-            df_et = df_et[df_et["Estado"].isin(sel_estado_atual)]
-        if sel_cidade_atual:
-            df_et = df_et[df_et["Cidade"].isin(sel_cidade_atual)]
-        if sel_origem_atual:
-            df_et = df_et[df_et["Origem do Tráfego"].isin(sel_origem_atual)]
-        opcoes_etapa = sorted(df_et["Etapa"].dropna().unique().tolist())
+        st.session_state["widget_filter_evt_pais"] = st.session_state["saved_filter_evt_pais"]
+        st.session_state["widget_filter_evt_est"] = st.session_state["saved_filter_evt_est"]
+        st.session_state["widget_filter_evt_cid"] = st.session_state["saved_filter_evt_cid"]
+        st.session_state["widget_filter_evt_etapa"] = st.session_state["saved_filter_evt_etapa"]
+        st.session_state["widget_filter_evt_origem"] = st.session_state["saved_filter_evt_origem"]
 
-        df_o = df_eventos.copy()
-        if sel_pais_atual:
-            df_o = df_o[df_o["País"].isin(sel_pais_atual)]
-        if sel_estado_atual:
-            df_o = df_o[df_o["Estado"].isin(sel_estado_atual)]
-        if sel_cidade_atual:
-            df_o = df_o[df_o["Cidade"].isin(sel_cidade_atual)]
-        if sel_etapa_atual:
-            df_o = df_o[df_o["Etapa"].isin(sel_etapa_atual)]
-        opcoes_origem = sorted(df_o["Origem do Tráfego"].dropna().unique().tolist())
-
-        # Sanitização de escolhas
-        st.session_state["saved_filter_pais"] = [
-            x for x in st.session_state["saved_filter_pais"] if x in opcoes_pais
-        ]
-        st.session_state["saved_filter_estado"] = [
-            x for x in st.session_state["saved_filter_estado"] if x in opcoes_estado
-        ]
-        st.session_state["saved_filter_cidade"] = [
-            x for x in st.session_state["saved_filter_cidade"] if x in opcoes_cidade
-        ]
-        st.session_state["saved_filter_etapa"] = [
-            x for x in st.session_state["saved_filter_etapa"] if x in opcoes_etapa
-        ]
-        st.session_state["saved_filter_origem"] = [
-            x for x in st.session_state["saved_filter_origem"] if x in opcoes_origem
-        ]
-
-        st.session_state["widget_filter_pais"] = st.session_state["saved_filter_pais"]
-        st.session_state["widget_filter_estado"] = st.session_state["saved_filter_estado"]
-        st.session_state["widget_filter_cidade"] = st.session_state["saved_filter_cidade"]
-        st.session_state["widget_filter_etapa"] = st.session_state["saved_filter_etapa"]
-        st.session_state["widget_filter_origem"] = st.session_state["saved_filter_origem"]
-
-        # 4. Interface Popover + Botão Reset
-        with col_f3:
+        with col_e3:
             st.write("")
             st.write("")
             with st.popover("⚙️ Filtrar por Colunas"):
-                st.markdown("**Filtros dinâmicos (deixe vazio para mostrar tudo):**")
-                sel_pais = st.multiselect(
-                    "País:",
-                    options=opcoes_pais,
-                    key="widget_filter_pais",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_pais": st.session_state["widget_filter_pais"]}
-                    ),
-                )
-                sel_estado = st.multiselect(
-                    "Estado:",
-                    options=opcoes_estado,
-                    key="widget_filter_estado",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_estado": st.session_state["widget_filter_estado"]}
-                    ),
-                )
-                sel_cidade = st.multiselect(
-                    "Cidade:",
-                    options=opcoes_cidade,
-                    key="widget_filter_cidade",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cidade": st.session_state["widget_filter_cidade"]}
-                    ),
-                )
-                sel_etapa = st.multiselect(
-                    "Etapa do Funil:",
-                    options=opcoes_etapa,
-                    key="widget_filter_etapa",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_etapa": st.session_state["widget_filter_etapa"]}
-                    ),
-                )
-                sel_origem = st.multiselect(
-                    "Origem do Tráfego:",
-                    options=opcoes_origem,
-                    key="widget_filter_origem",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_origem": st.session_state["widget_filter_origem"]}
-                    ),
-                )
+                sel_pais_evt = st.multiselect("País:", options=opcoes_pais_evt, key="widget_filter_evt_pais", on_change=lambda: st.session_state.update({"saved_filter_evt_pais": st.session_state["widget_filter_evt_pais"]}))
+                sel_est_evt = st.multiselect("Estado:", options=opcoes_est_evt, key="widget_filter_evt_est", on_change=lambda: st.session_state.update({"saved_filter_evt_est": st.session_state["widget_filter_evt_est"]}))
+                sel_cid_evt = st.multiselect("Cidade:", options=opcoes_cid_evt, key="widget_filter_evt_cid", on_change=lambda: st.session_state.update({"saved_filter_evt_cid": st.session_state["widget_filter_evt_cid"]}))
+                sel_etapa_evt = st.multiselect("Etapa:", options=opcoes_etapa_evt, key="widget_filter_evt_etapa", on_change=lambda: st.session_state.update({"saved_filter_evt_etapa": st.session_state["widget_filter_evt_etapa"]}))
+                sel_origem_evt = st.multiselect("Origem do Tráfego:", options=opcoes_origem_evt, key="widget_filter_evt_origem", on_change=lambda: st.session_state.update({"saved_filter_evt_origem": st.session_state["widget_filter_evt_origem"]}))
 
-                if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_e"):
-                    st.session_state["saved_filter_pais"] = []
-                    st.session_state["saved_filter_estado"] = []
-                    st.session_state["saved_filter_cidade"] = []
-                    st.session_state["saved_filter_etapa"] = []
-                    st.session_state["saved_filter_origem"] = []
-                    for k in [
-                        "widget_filter_pais",
-                        "widget_filter_estado",
-                        "widget_filter_cidade",
-                        "widget_filter_etapa",
-                        "widget_filter_origem",
-                    ]:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                st.markdown("---")
+                if st.button("🔄 Resetar Filtros (Tráfego)", use_container_width=True):
+                    for k in chaves_eventos:
+                        st.session_state[k] = []
+                        w_key = k.replace("saved_", "widget_")
+                        if w_key in st.session_state:
+                            del st.session_state[w_key]
                     st.rerun()
 
-        # 5. Aplicação final dos filtros
-        df_filtrado = df_eventos.copy()
-        if sel_pais:
-            df_filtrado = df_filtrado[df_filtrado["País"].isin(sel_pais)]
-        if sel_estado:
-            df_filtrado = df_filtrado[df_filtrado["Estado"].isin(sel_estado)]
-        if sel_cidade:
-            df_filtrado = df_filtrado[df_filtrado["Cidade"].isin(sel_cidade)]
-        if sel_etapa:
-            df_filtrado = df_filtrado[df_filtrado["Etapa"].isin(sel_etapa)]
-        if sel_origem:
-            df_filtrado = df_filtrado[df_filtrado["Origem do Tráfego"].isin(sel_origem)]
+        df_eventos_filtrado = df_eventos.copy()
+        if sel_pais_evt:
+            df_eventos_filtrado = df_eventos_filtrado[df_eventos_filtrado["País"].isin(sel_pais_evt)]
+        if sel_est_evt:
+            df_eventos_filtrado = df_eventos_filtrado[df_eventos_filtrado["Estado"].isin(sel_est_evt)]
+        if sel_cid_evt:
+            df_eventos_filtrado = df_eventos_filtrado[df_eventos_filtrado["Cidade"].isin(sel_cid_evt)]
+        if sel_etapa_evt:
+            df_eventos_filtrado = df_eventos_filtrado[df_eventos_filtrado["Etapa"].isin(sel_etapa_evt)]
+        if sel_origem_evt:
+            df_eventos_filtrado = df_eventos_filtrado[df_eventos_filtrado["Origem do Tráfego"].isin(sel_origem_evt)]
 
-        # Renderização em tela
         st.dataframe(
-            df_filtrado,
+            df_eventos_filtrado,
             column_config={
                 "Data do Evento": st.column_config.DateColumn("Data do Evento", format="DD/MM/YYYY"),
                 "Sessões": st.column_config.NumberColumn("Sessões", format="%d"),
@@ -606,29 +536,23 @@ def renderizar(con):
             hide_index=True,
         )
 
-        # 6. Montagem do texto detalhado de filtros para a célula A1 do Excel
-        detalhes_filtros = [
-            f"Período: {data_inicio_e.strftime('%d/%m/%Y')} a {data_fim_e.strftime('%d/%m/%Y')}"
-        ]
-        if sel_pais:
-            detalhes_filtros.append(f"País: {', '.join(sel_pais)}")
-        if sel_estado:
-            detalhes_filtros.append(f"Estado: {', '.join(sel_estado)}")
-        if sel_cidade:
-            detalhes_filtros.append(f"Cidade: {', '.join(sel_cidade)}")
-        if sel_etapa:
-            detalhes_filtros.append(f"Etapa: {', '.join(sel_etapa)}")
-        if sel_origem:
-            detalhes_filtros.append(f"Origem: {', '.join(sel_origem)}")
+        detalhes_filtros_e = [f"Período: {data_inicio_e.strftime('%d/%m/%Y')} a {data_fim_e.strftime('%d/%m/%Y')}"]
+        if sel_pais_evt:
+            detalhes_filtros_e.append(f"País: {', '.join(sel_pais_evt)}")
+        if sel_est_evt:
+            detalhes_filtros_e.append(f"Estado: {', '.join(sel_est_evt)}")
+        if sel_cid_evt:
+            detalhes_filtros_e.append(f"Cidade: {', '.join(sel_cid_evt)}")
+        if sel_etapa_evt:
+            detalhes_filtros_e.append(f"Etapa: {', '.join(sel_etapa_evt)}")
+        if sel_origem_evt:
+            detalhes_filtros_e.append(f"Origem: {', '.join(sel_origem_evt)}")
 
-        texto_filtros_a1 = "Filtros aplicados: " + " | ".join(detalhes_filtros)
+        texto_eventos_a1 = "Filtros aplicados: " + " | ".join(detalhes_filtros_e)
 
-        # Botão único: inerte nas mudanças de filtros/telas e executado no clique
         st.download_button(
-            label="📥 Exportar em Excel (.xlsx)",
-            data=lambda: gerar_excel(
-                df_filtrado, texto_filtros_a1, nome_aba="Trafego"
-            ),
+            label="📥 Exportar Analítico de Tráfego em Excel (.xlsx)",
+            data=lambda: gerar_excel(df_eventos_filtrado, texto_eventos_a1, nome_aba="Trafego_Web"),
             file_name="trafego.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -646,21 +570,10 @@ def renderizar(con):
 
     col_p1, col_p2, col_p3 = st.columns(3)
     with col_p1:
-        data_inicio_p = st.date_input(
-            "Data Inicial",
-            pd.to_datetime("2023-01-01"),
-            format="DD/MM/YYYY",
-            key="data_inicio_p",
-        )
+        data_inicio_p = st.date_input("Data Inicial", pd.to_datetime("2023-01-01"), format="DD/MM/YYYY", key="data_inicio_p")
     with col_p2:
-        data_fim_p = st.date_input(
-            "Data Final",
-            pd.to_datetime("2024-12-31"),
-            format="DD/MM/YYYY",
-            key="data_fim_p",
-        )
+        data_fim_p = st.date_input("Data Final", pd.to_datetime("2024-12-31"), format="DD/MM/YYYY", key="data_fim_p")
 
-    # Busca os dados usando a função em cache
     try:
         df_pedidos = buscar_dados_pedidos(con, data_inicio_p, data_fim_p)
     except Exception:
@@ -669,22 +582,11 @@ def renderizar(con):
     if not df_pedidos.empty:
         df_pedidos["Data do Pedido"] = pd.to_datetime(df_pedidos["Data do Pedido"])
 
-        # 1. Inicialização de chaves no session_state para persistência de todos os 8 filtros
-        chaves_pedidos = [
-            "saved_filter_ped_pais",
-            "saved_filter_ped_estado",
-            "saved_filter_ped_cidade",
-            "saved_filter_ped_cat",
-            "saved_filter_ped_dep",
-            "saved_filter_ped_status",
-            "saved_filter_ped_marca",
-            "saved_filter_ped_centro",
-        ]
+        chaves_pedidos = ["saved_filter_ped_pais", "saved_filter_ped_estado", "saved_filter_ped_cidade", "saved_filter_ped_cat", "saved_filter_ped_dep", "saved_filter_ped_status", "saved_filter_ped_marca", "saved_filter_ped_centro"]
         for k in chaves_pedidos:
             if k not in st.session_state:
                 st.session_state[k] = []
 
-        # 2. Leitura dos estados atuais
         sel_pais_atual = st.session_state["saved_filter_ped_pais"]
         sel_est_atual = st.session_state["saved_filter_ped_estado"]
         sel_cid_atual = st.session_state["saved_filter_ped_cidade"]
@@ -694,7 +596,6 @@ def renderizar(con):
         sel_marca_atual = st.session_state["saved_filter_ped_marca"]
         sel_centro_atual = st.session_state["saved_filter_ped_centro"]
 
-        # 3. Cálculo das Opções Dinâmicas em Cascata (cada filtro considera os outros 7)
         def filtrar_base_ped(exceto=None):
             df_temp = df_pedidos.copy()
             if exceto != "pais" and sel_pais_atual:
@@ -715,148 +616,45 @@ def renderizar(con):
                 df_temp = df_temp[df_temp["Centro de Distribuição"].isin(sel_centro_atual)]
             return df_temp
 
-        opcoes_pais = sorted(
-            filtrar_base_ped("pais")["País do Usuário"].dropna().unique().tolist()
-        )
-        opcoes_estado = sorted(
-            filtrar_base_ped("estado")["Estado do Usuário"].dropna().unique().tolist()
-        )
-        opcoes_cidade = sorted(
-            filtrar_base_ped("cidade")["Cidade do Usuário"].dropna().unique().tolist()
-        )
-        opcoes_cat = sorted(
-            filtrar_base_ped("cat")["Categoria"].dropna().unique().tolist()
-        )
-        opcoes_dep = sorted(
-            filtrar_base_ped("dep")["Departamento"].dropna().unique().tolist()
-        )
-        opcoes_status = sorted(
-            filtrar_base_ped("status")["Status"].dropna().unique().tolist()
-        )
-        opcoes_marca = sorted(
-            filtrar_base_ped("marca")["Marca"].dropna().unique().tolist()
-        )
-        opcoes_centro = sorted(
-            filtrar_base_ped("centro")["Centro de Distribuição"].dropna().unique().tolist()
-        )
+        opcoes_pais = sorted(filtrar_base_ped("pais")["País do Usuário"].dropna().unique().tolist())
+        opcoes_estado = sorted(filtrar_base_ped("estado")["Estado do Usuário"].dropna().unique().tolist())
+        opcoes_cidade = sorted(filtrar_base_ped("cidade")["Cidade do Usuário"].dropna().unique().tolist())
+        opcoes_cat = sorted(filtrar_base_ped("cat")["Categoria"].dropna().unique().tolist())
+        opcoes_dep = sorted(filtrar_base_ped("dep")["Departamento"].dropna().unique().tolist())
+        opcoes_status = sorted(filtrar_base_ped("status")["Status"].dropna().unique().tolist())
+        opcoes_marca = sorted(filtrar_base_ped("marca")["Marca"].dropna().unique().tolist())
+        opcoes_centro = sorted(filtrar_base_ped("centro")["Centro de Distribuição"].dropna().unique().tolist())
 
-        # Sanitização de escolhas salvas caso percam a validade na cascata
-        st.session_state["saved_filter_ped_pais"] = [
-            x for x in st.session_state["saved_filter_ped_pais"] if x in opcoes_pais
-        ]
-        st.session_state["saved_filter_ped_estado"] = [
-            x for x in st.session_state["saved_filter_ped_estado"] if x in opcoes_estado
-        ]
-        st.session_state["saved_filter_ped_cidade"] = [
-            x for x in st.session_state["saved_filter_ped_cidade"] if x in opcoes_cidade
-        ]
-        st.session_state["saved_filter_ped_cat"] = [
-            x for x in st.session_state["saved_filter_ped_cat"] if x in opcoes_cat
-        ]
-        st.session_state["saved_filter_ped_dep"] = [
-            x for x in st.session_state["saved_filter_ped_dep"] if x in opcoes_dep
-        ]
-        st.session_state["saved_filter_ped_status"] = [
-            x for x in st.session_state["saved_filter_ped_status"] if x in opcoes_status
-        ]
-        st.session_state["saved_filter_ped_marca"] = [
-            x for x in st.session_state["saved_filter_ped_marca"] if x in opcoes_marca
-        ]
-        st.session_state["saved_filter_ped_centro"] = [
-            x for x in st.session_state["saved_filter_ped_centro"] if x in opcoes_centro
-        ]
+        st.session_state["saved_filter_ped_pais"] = [x for x in st.session_state["saved_filter_ped_pais"] if x in opcoes_pais]
+        st.session_state["saved_filter_ped_estado"] = [x for x in st.session_state["saved_filter_ped_estado"] if x in opcoes_estado]
+        st.session_state["saved_filter_ped_cidade"] = [x for x in st.session_state["saved_filter_ped_cidade"] if x in opcoes_cidade]
+        st.session_state["saved_filter_ped_cat"] = [x for x in st.session_state["saved_filter_ped_cat"] if x in opcoes_cat]
+        st.session_state["saved_filter_ped_dep"] = [x for x in st.session_state["saved_filter_ped_dep"] if x in opcoes_dep]
+        st.session_state["saved_filter_ped_status"] = [x for x in st.session_state["saved_filter_ped_status"] if x in opcoes_status]
+        st.session_state["saved_filter_ped_marca"] = [x for x in st.session_state["saved_filter_ped_marca"] if x in opcoes_marca]
+        st.session_state["saved_filter_ped_centro"] = [x for x in st.session_state["saved_filter_ped_centro"] if x in opcoes_centro]
 
-        # Sincronização dos widgets
-        st.session_state["widget_filter_ped_pais"] = st.session_state[
-            "saved_filter_ped_pais"
-        ]
-        st.session_state["widget_filter_ped_estado"] = st.session_state[
-            "saved_filter_ped_estado"
-        ]
-        st.session_state["widget_filter_ped_cidade"] = st.session_state[
-            "saved_filter_ped_cidade"
-        ]
+        st.session_state["widget_filter_ped_pais"] = st.session_state["saved_filter_ped_pais"]
+        st.session_state["widget_filter_ped_estado"] = st.session_state["saved_filter_ped_estado"]
+        st.session_state["widget_filter_ped_cidade"] = st.session_state["saved_filter_ped_cidade"]
         st.session_state["widget_filter_ped_cat"] = st.session_state["saved_filter_ped_cat"]
         st.session_state["widget_filter_ped_dep"] = st.session_state["saved_filter_ped_dep"]
-        st.session_state["widget_filter_ped_status"] = st.session_state[
-            "saved_filter_ped_status"
-        ]
-        st.session_state["widget_filter_ped_marca"] = st.session_state[
-            "saved_filter_ped_marca"
-        ]
-        st.session_state["widget_filter_ped_centro"] = st.session_state[
-            "saved_filter_ped_centro"
-        ]
+        st.session_state["widget_filter_ped_status"] = st.session_state["saved_filter_ped_status"]
+        st.session_state["widget_filter_ped_marca"] = st.session_state["saved_filter_ped_marca"]
+        st.session_state["widget_filter_ped_centro"] = st.session_state["saved_filter_ped_centro"]
 
-        # 4. Popover de Filtros Dinâmicos
         with col_p3:
             st.write("")
             st.write("")
             with st.popover("⚙️ Filtrar por Colunas"):
-                sel_pais = st.multiselect(
-                    "País do Usuário:",
-                    options=opcoes_pais,
-                    key="widget_filter_ped_pais",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_pais": st.session_state["widget_filter_ped_pais"]}
-                    ),
-                )
-                sel_estado = st.multiselect(
-                    "Estado do Usuário:",
-                    options=opcoes_estado,
-                    key="widget_filter_ped_estado",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_estado": st.session_state["widget_filter_ped_estado"]}
-                    ),
-                )
-                sel_cidade = st.multiselect(
-                    "Cidade do Usuário:",
-                    options=opcoes_cidade,
-                    key="widget_filter_ped_cidade",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_cidade": st.session_state["widget_filter_ped_cidade"]}
-                    ),
-                )
-                sel_cat = st.multiselect(
-                    "Categoria:",
-                    options=opcoes_cat,
-                    key="widget_filter_ped_cat",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_cat": st.session_state["widget_filter_ped_cat"]}
-                    ),
-                )
-                sel_dep = st.multiselect(
-                    "Departamento:",
-                    options=opcoes_dep,
-                    key="widget_filter_ped_dep",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_dep": st.session_state["widget_filter_ped_dep"]}
-                    ),
-                )
-                sel_marca = st.multiselect(
-                    "Marca:",
-                    options=opcoes_marca,
-                    key="widget_filter_ped_marca",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_marca": st.session_state["widget_filter_ped_marca"]}
-                    ),
-                )
-                sel_centro = st.multiselect(
-                    "Centro de Distribuição:",
-                    options=opcoes_centro,
-                    key="widget_filter_ped_centro",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_centro": st.session_state["widget_filter_ped_centro"]}
-                    ),
-                )
-                sel_status = st.multiselect(
-                    "Status do Pedido:",
-                    options=opcoes_status,
-                    key="widget_filter_ped_status",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_ped_status": st.session_state["widget_filter_ped_status"]}
-                    ),
-                )
+                sel_pais = st.multiselect("País do Usuário:", options=opcoes_pais, key="widget_filter_ped_pais", on_change=lambda: st.session_state.update({"saved_filter_ped_pais": st.session_state["widget_filter_ped_pais"]}))
+                sel_estado = st.multiselect("Estado do Usuário:", options=opcoes_estado, key="widget_filter_ped_estado", on_change=lambda: st.session_state.update({"saved_filter_ped_estado": st.session_state["widget_filter_ped_estado"]}))
+                sel_cidade = st.multiselect("Cidade do Usuário:", options=opcoes_cidade, key="widget_filter_ped_cidade", on_change=lambda: st.session_state.update({"saved_filter_ped_cidade": st.session_state["widget_filter_ped_cidade"]}))
+                sel_cat = st.multiselect("Categoria:", options=opcoes_cat, key="widget_filter_ped_cat", on_change=lambda: st.session_state.update({"saved_filter_ped_cat": st.session_state["widget_filter_ped_cat"]}))
+                sel_dep = st.multiselect("Departamento:", options=opcoes_dep, key="widget_filter_ped_dep", on_change=lambda: st.session_state.update({"saved_filter_ped_dep": st.session_state["widget_filter_ped_dep"]}))
+                sel_marca = st.multiselect("Marca:", options=opcoes_marca, key="widget_filter_ped_marca", on_change=lambda: st.session_state.update({"saved_filter_ped_marca": st.session_state["widget_filter_ped_marca"]}))
+                sel_centro = st.multiselect("Centro de Distribuição:", options=opcoes_centro, key="widget_filter_ped_centro", on_change=lambda: st.session_state.update({"saved_filter_ped_centro": st.session_state["widget_filter_ped_centro"]}))
+                sel_status = st.multiselect("Status do Pedido:", options=opcoes_status, key="widget_filter_ped_status", on_change=lambda: st.session_state.update({"saved_filter_ped_status": st.session_state["widget_filter_ped_status"]}))
 
                 if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_p"):
                     for k in chaves_pedidos:
@@ -866,69 +664,38 @@ def renderizar(con):
                             del st.session_state[w_key]
                     st.rerun()
 
-        # 5. Aplicação final dos filtros no DataFrame
         df_pedidos_filtrado = df_pedidos.copy()
         if sel_pais:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["País do Usuário"].isin(sel_pais)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["País do Usuário"].isin(sel_pais)]
         if sel_estado:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Estado do Usuário"].isin(sel_estado)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Estado do Usuário"].isin(sel_estado)]
         if sel_cidade:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Cidade do Usuário"].isin(sel_cidade)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Cidade do Usuário"].isin(sel_cidade)]
         if sel_cat:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Categoria"].isin(sel_cat)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Categoria"].isin(sel_cat)]
         if sel_dep:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Departamento"].isin(sel_dep)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Departamento"].isin(sel_dep)]
         if sel_status:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Status"].isin(sel_status)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Status"].isin(sel_status)]
         if sel_marca:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Marca"].isin(sel_marca)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Marca"].isin(sel_marca)]
         if sel_centro:
-            df_pedidos_filtrado = df_pedidos_filtrado[
-                df_pedidos_filtrado["Centro de Distribuição"].isin(sel_centro)
-            ]
+            df_pedidos_filtrado = df_pedidos_filtrado[df_pedidos_filtrado["Centro de Distribuição"].isin(sel_centro)]
 
-        # Renderização da tabela
         st.dataframe(
             df_pedidos_filtrado,
             column_config={
-                "Data do Pedido": st.column_config.DateColumn(
-                    "Data do Pedido", format="DD/MM/YYYY"
-                ),
-                "Quantidade Vendida": st.column_config.NumberColumn(
-                    "Quantidade Vendida", format="%d"
-                ),
-                "Receita Total (US$)": st.column_config.NumberColumn(
-                    "Receita Total (US$)", format="$ %.2f"
-                ),
-                "Custo Total (US$)": st.column_config.NumberColumn(
-                    "Custo Total (US$)", format="$ %.2f"
-                ),
-                "Margem de Lucro Bruto (US$)": st.column_config.NumberColumn(
-                    "Margem de Lucro Bruto (US$)", format="$ %.2f"
-                ),
+                "Data do Pedido": st.column_config.DateColumn("Data do Pedido", format="DD/MM/YYYY"),
+                "Quantidade Vendida": st.column_config.NumberColumn("Quantidade Vendida", format="%d"),
+                "Receita Total (US$)": st.column_config.NumberColumn("Receita Total (US$)", format="$ %.2f"),
+                "Custo Total (US$)": st.column_config.NumberColumn("Custo Total (US$)", format="$ %.2f"),
+                "Margem de Lucro Bruto (US$)": st.column_config.NumberColumn("Margem de Lucro Bruto (US$)", format="$ %.2f"),
             },
             use_container_width=True,
             hide_index=True,
         )
 
-        # 6. Exportação compacta em Excel (.xlsx) com descrição completa dos filtros
-        detalhes_filtros_p = [
-            f"Período: {data_inicio_p.strftime('%d/%m/%Y')} a {data_fim_p.strftime('%d/%m/%Y')}"
-        ]
+        detalhes_filtros_p = [f"Período: {data_inicio_p.strftime('%d/%m/%Y')} a {data_fim_p.strftime('%d/%m/%Y')}"]
         if sel_pais:
             detalhes_filtros_p.append(f"País: {', '.join(sel_pais)}")
         if sel_estado:
@@ -950,9 +717,7 @@ def renderizar(con):
 
         st.download_button(
             label="📥 Exportar em Excel (.xlsx)",
-            data=lambda: gerar_excel(
-                df_pedidos_filtrado, texto_pedidos_a1, nome_aba="Vendas"
-            ),
+            data=lambda: gerar_excel(df_pedidos_filtrado, texto_pedidos_a1, nome_aba="Vendas"),
             file_name="vendas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
@@ -970,21 +735,10 @@ def renderizar(con):
 
     col_c1, col_c2, col_c3 = st.columns(3)
     with col_c1:
-        data_inicio_c = st.date_input(
-            "Data Inicial",
-            pd.to_datetime("2023-01-01"),
-            format="DD/MM/YYYY",
-            key="data_inicio_c",
-        )
+        data_inicio_c = st.date_input("Data Inicial", pd.to_datetime("2023-01-01"), format="DD/MM/YYYY", key="data_inicio_c")
     with col_c2:
-        data_fim_c = st.date_input(
-            "Data Final",
-            pd.to_datetime("2024-12-31"),
-            format="DD/MM/YYYY",
-            key="data_fim_c",
-        )
+        data_fim_c = st.date_input("Data Final", pd.to_datetime("2024-12-31"), format="DD/MM/YYYY", key="data_fim_c")
 
-    # Busca os dados usando a função em cache
     try:
         df_clientes = buscar_dados_clientes(con, data_inicio_c, data_fim_c)
     except Exception:
@@ -993,20 +747,11 @@ def renderizar(con):
     if not df_clientes.empty:
         df_clientes["Data de Cadastro"] = pd.to_datetime(df_clientes["Data de Cadastro"])
 
-        # 1. Inicialização de chaves no session_state para persistência dos 6 filtros
-        chaves_clientes = [
-            "saved_filter_cli_pais",
-            "saved_filter_cli_est",
-            "saved_filter_cli_cid",
-            "saved_filter_cli_gen",
-            "saved_filter_cli_faixa",
-            "saved_filter_cli_canal",
-        ]
+        chaves_clientes = ["saved_filter_cli_pais", "saved_filter_cli_est", "saved_filter_cli_cid", "saved_filter_cli_gen", "saved_filter_cli_faixa", "saved_filter_cli_canal"]
         for k in chaves_clientes:
             if k not in st.session_state:
                 st.session_state[k] = []
 
-        # 2. Leitura dos estados atuais
         sel_pais_cli_atual = st.session_state["saved_filter_cli_pais"]
         sel_est_cli_atual = st.session_state["saved_filter_cli_est"]
         sel_cid_cli_atual = st.session_state["saved_filter_cli_cid"]
@@ -1014,7 +759,6 @@ def renderizar(con):
         sel_faixa_cli_atual = st.session_state["saved_filter_cli_faixa"]
         sel_canal_cli_atual = st.session_state["saved_filter_cli_canal"]
 
-        # 3. Cálculo das Opções Dinâmicas em Cascata
         def filtrar_base_cli(exceto=None):
             df_temp = df_clientes.copy()
             if exceto != "pais" and sel_pais_cli_atual:
@@ -1031,112 +775,37 @@ def renderizar(con):
                 df_temp = df_temp[df_temp["Canal de Aquisição"].isin(sel_canal_cli_atual)]
             return df_temp
 
-        opcoes_pais_cli = sorted(
-            filtrar_base_cli("pais")["País"].dropna().unique().tolist()
-        )
-        opcoes_est_cli = sorted(
-            filtrar_base_cli("est")["Estado"].dropna().unique().tolist()
-        )
-        opcoes_cid_cli = sorted(
-            filtrar_base_cli("cid")["Cidade"].dropna().unique().tolist()
-        )
-        opcoes_gen_cli = sorted(
-            filtrar_base_cli("gen")["Gênero"].dropna().unique().tolist()
-        )
-        opcoes_faixa_cli = sorted(
-            filtrar_base_cli("faixa")["Faixa Etária"].dropna().unique().tolist()
-        )
-        opcoes_canal_cli = sorted(
-            filtrar_base_cli("canal")["Canal de Aquisição"].dropna().unique().tolist()
-        )
+        opcoes_pais_cli = sorted(filtrar_base_cli("pais")["País"].dropna().unique().tolist())
+        opcoes_est_cli = sorted(filtrar_base_cli("est")["Estado"].dropna().unique().tolist())
+        opcoes_cid_cli = sorted(filtrar_base_cli("cid")["Cidade"].dropna().unique().tolist())
+        opcoes_gen_cli = sorted(filtrar_base_cli("gen")["Gênero"].dropna().unique().tolist())
+        opcoes_faixa_cli = sorted(filtrar_base_cli("faixa")["Faixa Etária"].dropna().unique().tolist())
+        opcoes_canal_cli = sorted(filtrar_base_cli("canal")["Canal de Aquisição"].dropna().unique().tolist())
 
-        # Sanitização de escolhas salvas
-        st.session_state["saved_filter_cli_pais"] = [
-            x for x in st.session_state["saved_filter_cli_pais"] if x in opcoes_pais_cli
-        ]
-        st.session_state["saved_filter_cli_est"] = [
-            x for x in st.session_state["saved_filter_cli_est"] if x in opcoes_est_cli
-        ]
-        st.session_state["saved_filter_cli_cid"] = [
-            x for x in st.session_state["saved_filter_cli_cid"] if x in opcoes_cid_cli
-        ]
-        st.session_state["saved_filter_cli_gen"] = [
-            x for x in st.session_state["saved_filter_cli_gen"] if x in opcoes_gen_cli
-        ]
-        st.session_state["saved_filter_cli_faixa"] = [
-            x for x in st.session_state["saved_filter_cli_faixa"] if x in opcoes_faixa_cli
-        ]
-        st.session_state["saved_filter_cli_canal"] = [
-            x for x in st.session_state["saved_filter_cli_canal"] if x in opcoes_canal_cli
-        ]
+        st.session_state["saved_filter_cli_pais"] = [x for x in st.session_state["saved_filter_cli_pais"] if x in opcoes_pais_cli]
+        st.session_state["saved_filter_cli_est"] = [x for x in st.session_state["saved_filter_cli_est"] if x in opcoes_est_cli]
+        st.session_state["saved_filter_cli_cid"] = [x for x in st.session_state["saved_filter_cli_cid"] if x in opcoes_cid_cli]
+        st.session_state["saved_filter_cli_gen"] = [x for x in st.session_state["saved_filter_cli_gen"] if x in opcoes_gen_cli]
+        st.session_state["saved_filter_cli_faixa"] = [x for x in st.session_state["saved_filter_cli_faixa"] if x in opcoes_faixa_cli]
+        st.session_state["saved_filter_cli_canal"] = [x for x in st.session_state["saved_filter_cli_canal"] if x in opcoes_canal_cli]
 
-        # Sincronização dos widgets
-        st.session_state["widget_filter_cli_pais"] = st.session_state[
-            "saved_filter_cli_pais"
-        ]
+        st.session_state["widget_filter_cli_pais"] = st.session_state["saved_filter_cli_pais"]
         st.session_state["widget_filter_cli_est"] = st.session_state["saved_filter_cli_est"]
         st.session_state["widget_filter_cli_cid"] = st.session_state["saved_filter_cli_cid"]
         st.session_state["widget_filter_cli_gen"] = st.session_state["saved_filter_cli_gen"]
-        st.session_state["widget_filter_cli_faixa"] = st.session_state[
-            "saved_filter_cli_faixa"
-        ]
-        st.session_state["widget_filter_cli_canal"] = st.session_state[
-            "saved_filter_cli_canal"
-        ]
+        st.session_state["widget_filter_cli_faixa"] = st.session_state["saved_filter_cli_faixa"]
+        st.session_state["widget_filter_cli_canal"] = st.session_state["saved_filter_cli_canal"]
 
-        # 4. Popover de Filtros Dinâmicos
         with col_c3:
             st.write("")
             st.write("")
             with st.popover("⚙️ Filtrar por Colunas"):
-                sel_pais_cli = st.multiselect(
-                    "País:",
-                    options=opcoes_pais_cli,
-                    key="widget_filter_cli_pais",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_pais": st.session_state["widget_filter_cli_pais"]}
-                    ),
-                )
-                sel_est_cli = st.multiselect(
-                    "Estado:",
-                    options=opcoes_est_cli,
-                    key="widget_filter_cli_est",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_est": st.session_state["widget_filter_cli_est"]}
-                    ),
-                )
-                sel_cid_cli = st.multiselect(
-                    "Cidade:",
-                    options=opcoes_cid_cli,
-                    key="widget_filter_cli_cid",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_cid": st.session_state["widget_filter_cli_cid"]}
-                    ),
-                )
-                sel_gen_cli = st.multiselect(
-                    "Gênero:",
-                    options=opcoes_gen_cli,
-                    key="widget_filter_cli_gen",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_gen": st.session_state["widget_filter_cli_gen"]}
-                    ),
-                )
-                sel_faixa_cli = st.multiselect(
-                    "Faixa Etária:",
-                    options=opcoes_faixa_cli,
-                    key="widget_filter_cli_faixa",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_faixa": st.session_state["widget_filter_cli_faixa"]}
-                    ),
-                )
-                sel_canal_cli = st.multiselect(
-                    "Canal de Aquisição:",
-                    options=opcoes_canal_cli,
-                    key="widget_filter_cli_canal",
-                    on_change=lambda: st.session_state.update(
-                        {"saved_filter_cli_canal": st.session_state["widget_filter_cli_canal"]}
-                    ),
-                )
+                sel_pais_cli = st.multiselect("País:", options=opcoes_pais_cli, key="widget_filter_cli_pais", on_change=lambda: st.session_state.update({"saved_filter_cli_pais": st.session_state["widget_filter_cli_pais"]}))
+                sel_est_cli = st.multiselect("Estado:", options=opcoes_est_cli, key="widget_filter_cli_est", on_change=lambda: st.session_state.update({"saved_filter_cli_est": st.session_state["widget_filter_cli_est"]}))
+                sel_cid_cli = st.multiselect("Cidade:", options=opcoes_cid_cli, key="widget_filter_cli_cid", on_change=lambda: st.session_state.update({"saved_filter_cli_cid": st.session_state["widget_filter_cli_cid"]}))
+                sel_gen_cli = st.multiselect("Gênero:", options=opcoes_gen_cli, key="widget_filter_cli_gen", on_change=lambda: st.session_state.update({"saved_filter_cli_gen": st.session_state["widget_filter_cli_gen"]}))
+                sel_faixa_cli = st.multiselect("Faixa Etária:", options=opcoes_faixa_cli, key="widget_filter_cli_faixa", on_change=lambda: st.session_state.update({"saved_filter_cli_faixa": st.session_state["widget_filter_cli_faixa"]}))
+                sel_canal_cli = st.multiselect("Canal de Aquisição:", options=opcoes_canal_cli, key="widget_filter_cli_canal", on_change=lambda: st.session_state.update({"saved_filter_cli_canal": st.session_state["widget_filter_cli_canal"]}))
 
                 if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_c"):
                     for k in chaves_clientes:
@@ -1146,64 +815,35 @@ def renderizar(con):
                             del st.session_state[w_key]
                     st.rerun()
 
-        # 5. Aplicação final dos filtros no DataFrame
         df_clientes_filtrado = df_clientes.copy()
         if sel_pais_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["País"].isin(sel_pais_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["País"].isin(sel_pais_cli)]
         if sel_est_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["Estado"].isin(sel_est_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Estado"].isin(sel_est_cli)]
         if sel_cid_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["Cidade"].isin(sel_cid_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Cidade"].isin(sel_cid_cli)]
         if sel_gen_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["Gênero"].isin(sel_gen_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Gênero"].isin(sel_gen_cli)]
         if sel_faixa_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["Faixa Etária"].isin(sel_faixa_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Faixa Etária"].isin(sel_faixa_cli)]
         if sel_canal_cli:
-            df_clientes_filtrado = df_clientes_filtrado[
-                df_clientes_filtrado["Canal de Aquisição"].isin(sel_canal_cli)
-            ]
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Canal de Aquisição"].isin(sel_canal_cli)]
 
-        # Renderização da tabela
         st.dataframe(
             df_clientes_filtrado,
             column_config={
-                "Data de Cadastro": st.column_config.DateColumn(
-                    "Data de Cadastro", format="DD/MM/YYYY"
-                ),
-                "Quantidade de Usuários": st.column_config.NumberColumn(
-                    "Quantidade de Usuários", format="%d"
-                ),
-                "Quantidade de Pedidos": st.column_config.NumberColumn(
-                    "Quantidade de Pedidos", format="%d"
-                ),
-                "Faturamento Gerado (US$)": st.column_config.NumberColumn(
-                    "Faturamento Gerado (US$)", format="$ %.2f"
-                ),
-                "Custo Total do Cliente (US$)": st.column_config.NumberColumn(
-                    "Custo Total do Cliente (US$)", format="$ %.2f"
-                ),
-                "LTV / Lucro Gerado (US$)": st.column_config.NumberColumn(
-                    "LTV / Lucro Gerado (US$)", format="$ %.2f"
-                ),
+                "Data de Cadastro": st.column_config.DateColumn("Data de Cadastro", format="DD/MM/YYYY"),
+                "Quantidade de Usuários": st.column_config.NumberColumn("Quantidade de Usuários", format="%d"),
+                "Quantidade de Pedidos": st.column_config.NumberColumn("Quantidade de Pedidos", format="%d"),
+                "Faturamento Gerado (US$)": st.column_config.NumberColumn("Faturamento Gerado (US$)", format="$ %.2f"),
+                "Custo Total do Cliente (US$)": st.column_config.NumberColumn("Custo Total do Cliente (US$)", format="$ %.2f"),
+                "LTV / Lucro Gerado (US$)": st.column_config.NumberColumn("LTV / Lucro Gerado (US$)", format="$ %.2f"),
             },
             use_container_width=True,
             hide_index=True,
         )
 
-        # 6. Exportação compacta em Excel (.xlsx) com descrição completa dos filtros
-        detalhes_filtros_c = [
-            f"Período: {data_inicio_c.strftime('%d/%m/%Y')} a {data_fim_c.strftime('%d/%m/%Y')}"
-        ]
+        detalhes_filtros_c = [f"Período: {data_inicio_c.strftime('%d/%m/%Y')} a {data_fim_c.strftime('%d/%m/%Y')}"]
         if sel_pais_cli:
             detalhes_filtros_c.append(f"País: {', '.join(sel_pais_cli)}")
         if sel_est_cli:
@@ -1221,11 +861,35 @@ def renderizar(con):
 
         st.download_button(
             label="📥 Exportar em Excel (.xlsx)",
-            data=lambda: gerar_excel(
-                df_clientes_filtrado, texto_clientes_a1, nome_aba="Clientes"
-            ),
+            data=lambda: gerar_excel(df_clientes_filtrado, texto_clientes_a1, nome_aba="Clientes"),
             file_name="clientes.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
         st.warning("Nenhum cliente encontrado para o período de cadastro selecionado.")
+
+    # ==============================================================================
+    # EXPORTAÇÃO CONSOLIDADA NA BARRA LATERAL (MOVIDA PARA O FINAL!)
+    # ==============================================================================
+    with st.sidebar:
+        st.markdown("---")
+        st.subheader("📦 Exportação Consolidada")
+        st.caption(
+            "Baixe todos os relatórios filtrados em uma única planilha Excel com abas separadas."
+        )
+        st.download_button(
+            label="📥 Baixar Relatório Completo (.xlsx)",
+            data=lambda: gerar_excel_relatorio_completo(
+                df_consolidado_excel,
+                texto_params,
+                df_eventos_filtrado,
+                texto_eventos_a1,
+                df_pedidos_filtrado,
+                texto_pedidos_a1,
+                df_clientes_filtrado,
+                texto_clientes_a1,
+            ),
+            file_name="relatorio_analitico_geral.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
