@@ -112,3 +112,54 @@ Como o protótipo opera integralmente em ambiente local (sem persistência em nu
 | Usuário | Senha 
 | :--- | :--- 
 | `admin@ecommerce.com` | `123456`
+
+---
+
+## 📸 6. Demonstração Visual e Telas do Protótipo
+
+### 🔑 Tela de Autenticação
+> Interface simples com controle de acesso e perfil de sessão.
+
+![Tela de Login](screenshots/login.png)
+
+---
+
+### 📊 Dashboard de Performance
+> Monitoramento integrado do funil de navegação, faturamento, ticket médio e perfil demográfico.
+
+| | |
+| :---: | :---: |
+| ![Dashboard 1](screenshots/dashboard1.png) | ![Dashboard 2](screenshots/dashboard2.png) |
+| ![Dashboard 3](screenshots/dashboard3.png) | ![Dashboard 4](screenshots/dashboard4.png) |
+| ![Dashboard 5](screenshots/dashboard5.png) | |
+
+---
+
+### 🔮 Módulo de Simulação (SAD & RFM)
+> Visualização das centróides dos 4 clusters comportamentais, alavancas promocionais e pareceres automatizados de viabilidade.
+
+| | |
+| :---: | :---: |
+| ![Simulador 1](screenshots/simulador1.png) | ![Simulador 2](screenshots/simulador2.png) |
+| ![Simulador 3](screenshots/simulador3.png) | ![Simulador 4](screenshots/simulador4.png) |
+
+---
+
+### 📄 Tela de Relatórios Analíticos
+> Tabelas analíticas detalhadas com filtros dinâmicos em cascata por demografia e período.
+
+| | |
+| :---: | :---: |
+| ![Relatórios 1](screenshots/relatorios1.png) | ![Relatórios 2](screenshots/relatorios2.png) |
+| ![Relatórios 3](screenshots/relatorios3.png) | ![Relatórios 4](screenshots/relatorios4.png) |
+| ![Relatórios 5](screenshots/relatorios5.png)
+
+---
+
+### 📈 Exportação de Relatórios em Excel (`.xlsx`)
+> Planilhas individuais para cada tema e uma planilha geral consolidada geradas em tempo de execução, contendo o registro auditável dos filtros ou parâmetros da simulação na célula **A1**.
+
+| | |
+| :---: | :---: |
+| ![Relatórios 6](screenshots/relatorios6.png) | ![Excel Clusters](screenshots/excel1.png) 
+| ![Excel Clientes](screenshots/excel2.png) |
