@@ -41,29 +41,32 @@ def gerar_excel_com_observacao(df_dados, parametros_dict):
     buffer.seek(0)
     return buffer
 
-def gerar_excel_eventos(df_dados, texto_filtros):
+def gerar_excel(df_dados, texto_filtros, nome_aba="Dados"):
     """
-    Gera a planilha Excel com o resumo dos filtros na célula A1
-    e a tabela de dados iniciando na célula A2 (linha 2).
+    Função genérica para exportar qualquer DataFrame para Excel com:
+    - Resumo dos filtros na célula A1
+    - Tabela de dados a partir da célula A3 (startrow=2)
+    - Formatação automática de todas as colunas de data no padrão DD/MM/YYYY
     """
     buffer = io.BytesIO()
     df_export = df_dados.copy()
 
-    # Formata datas para o padrão brasileiro DD/MM/YYYY
-    if "Data" in df_export.columns and pd.api.types.is_datetime64_any_dtype(
-        df_export["Data"]
-    ):
-        df_export["Data"] = df_export["Data"].dt.strftime("%d/%m/%Y")
+    # Formata automaticamente QUALQUER coluna do tipo datetime/data
+    for col in df_export.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_export[col]):
+            df_export[col] = df_export[col].dt.strftime("%d/%m/%Y")
 
-    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        # 1. Escreve a tabela a partir da célula A2 (startrow=1)
-        df_export.to_excel(
-            writer, sheet_name="Analitico", index=False, startrow=1
-        )
-
-        # 2. Escreve a mensagem dos filtros exatamente na célula A1 (linha 0, coluna 0)
-        worksheet = writer.sheets["Analitico"]
-        worksheet.write(0, 0, texto_filtros)
+    try:
+        with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+            df_export.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2)
+            ws = writer.sheets[nome_aba]
+            ws["A1"] = texto_filtros
+    except Exception:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            df_export.to_excel(writer, sheet_name=nome_aba, index=False, startrow=2)
+            ws = writer.sheets[nome_aba]
+            ws.write(0, 0, texto_filtros)
 
     buffer.seek(0)
     return buffer
@@ -539,8 +542,10 @@ def renderizar(con):
         # Botão único: inerte nas mudanças de filtros/telas e executado no clique
         st.download_button(
             label="📥 Exportar em Excel (.xlsx)",
-            data=lambda: gerar_excel_eventos(df_filtrado, texto_filtros_a1),
-            file_name="eventos.xlsx",
+            data=lambda: gerar_excel(
+                df_filtrado, texto_filtros_a1, nome_aba="Analitico_Trafego"
+            ),
+            file_name="trafego.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
