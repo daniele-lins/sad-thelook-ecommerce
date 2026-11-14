@@ -194,7 +194,8 @@ def buscar_dados_pedidos(_con, data_inicio, data_fim):
 @st.cache_data(show_spinner="Carregando dados de clientes...")
 def buscar_dados_clientes(_con, data_inicio, data_fim):
     query = f"""
-        SELECT 
+        SELECT
+            u.id AS user_id,
             TRY_CAST(u.created_at AS DATE) AS "Data de Cadastro",
             COALESCE(u.country, 'Não Informado') AS "País",
             COALESCE(u.state, 'Não Informado') AS "Estado",
@@ -745,13 +746,38 @@ def renderizar(con):
         df_clientes = pd.DataFrame()
 
     if not df_clientes.empty:
+        if "df_clustered" in locals() and not df_clustered.empty:
+            df_clientes = df_clientes.merge(
+                df_clustered[["user_id", "cluster_nome"]],
+                on="user_id",
+                how="left",
+            )
+            # Clientes sem histórico de compras recebem um rótulo padrão
+            df_clientes["Segmento (Cluster)"] = df_clientes["cluster_nome"].astype(object).fillna("Sem Cluster / Novo")
+            # Remove as colunas auxiliares do merge
+            df_clientes.drop(columns=["user_id", "cluster_nome"], inplace=True)
+        else:
+            df_clientes["Segmento (Cluster)"] = "Sem Cluster / Novo"
+            df_clientes.drop(columns=["user_id"], errors="ignore", inplace=True)
+
         df_clientes["Data de Cadastro"] = pd.to_datetime(df_clientes["Data de Cadastro"])
 
-        chaves_clientes = ["saved_filter_cli_pais", "saved_filter_cli_est", "saved_filter_cli_cid", "saved_filter_cli_gen", "saved_filter_cli_faixa", "saved_filter_cli_canal"]
+        # 1. Inicialização das chaves no session_state (incluindo Cluster)
+        chaves_clientes = [
+            "saved_filter_cli_cluster",
+            "saved_filter_cli_pais",
+            "saved_filter_cli_est",
+            "saved_filter_cli_cid",
+            "saved_filter_cli_gen",
+            "saved_filter_cli_faixa",
+            "saved_filter_cli_canal",
+        ]
         for k in chaves_clientes:
             if k not in st.session_state:
                 st.session_state[k] = []
 
+        # 2. Leitura dos estados atuais
+        sel_cluster_cli_atual = st.session_state["saved_filter_cli_cluster"]
         sel_pais_cli_atual = st.session_state["saved_filter_cli_pais"]
         sel_est_cli_atual = st.session_state["saved_filter_cli_est"]
         sel_cid_cli_atual = st.session_state["saved_filter_cli_cid"]
@@ -759,8 +785,11 @@ def renderizar(con):
         sel_faixa_cli_atual = st.session_state["saved_filter_cli_faixa"]
         sel_canal_cli_atual = st.session_state["saved_filter_cli_canal"]
 
+        # 3. Opções dinâmicas em cascata
         def filtrar_base_cli(exceto=None):
             df_temp = df_clientes.copy()
+            if exceto != "cluster" and sel_cluster_cli_atual:
+                df_temp = df_temp[df_temp["Segmento (Cluster)"].isin(sel_cluster_cli_atual)]
             if exceto != "pais" and sel_pais_cli_atual:
                 df_temp = df_temp[df_temp["País"].isin(sel_pais_cli_atual)]
             if exceto != "est" and sel_est_cli_atual:
@@ -775,6 +804,7 @@ def renderizar(con):
                 df_temp = df_temp[df_temp["Canal de Aquisição"].isin(sel_canal_cli_atual)]
             return df_temp
 
+        opcoes_cluster_cli = sorted(filtrar_base_cli("cluster")["Segmento (Cluster)"].dropna().unique().tolist())
         opcoes_pais_cli = sorted(filtrar_base_cli("pais")["País"].dropna().unique().tolist())
         opcoes_est_cli = sorted(filtrar_base_cli("est")["Estado"].dropna().unique().tolist())
         opcoes_cid_cli = sorted(filtrar_base_cli("cid")["Cidade"].dropna().unique().tolist())
@@ -782,6 +812,8 @@ def renderizar(con):
         opcoes_faixa_cli = sorted(filtrar_base_cli("faixa")["Faixa Etária"].dropna().unique().tolist())
         opcoes_canal_cli = sorted(filtrar_base_cli("canal")["Canal de Aquisição"].dropna().unique().tolist())
 
+        # Sanitização das escolhas salvas
+        st.session_state["saved_filter_cli_cluster"] = [x for x in st.session_state["saved_filter_cli_cluster"] if x in opcoes_cluster_cli]
         st.session_state["saved_filter_cli_pais"] = [x for x in st.session_state["saved_filter_cli_pais"] if x in opcoes_pais_cli]
         st.session_state["saved_filter_cli_est"] = [x for x in st.session_state["saved_filter_cli_est"] if x in opcoes_est_cli]
         st.session_state["saved_filter_cli_cid"] = [x for x in st.session_state["saved_filter_cli_cid"] if x in opcoes_cid_cli]
@@ -789,6 +821,8 @@ def renderizar(con):
         st.session_state["saved_filter_cli_faixa"] = [x for x in st.session_state["saved_filter_cli_faixa"] if x in opcoes_faixa_cli]
         st.session_state["saved_filter_cli_canal"] = [x for x in st.session_state["saved_filter_cli_canal"] if x in opcoes_canal_cli]
 
+        # Sincronização dos widgets
+        st.session_state["widget_filter_cli_cluster"] = st.session_state["saved_filter_cli_cluster"]
         st.session_state["widget_filter_cli_pais"] = st.session_state["saved_filter_cli_pais"]
         st.session_state["widget_filter_cli_est"] = st.session_state["saved_filter_cli_est"]
         st.session_state["widget_filter_cli_cid"] = st.session_state["saved_filter_cli_cid"]
@@ -796,16 +830,53 @@ def renderizar(con):
         st.session_state["widget_filter_cli_faixa"] = st.session_state["saved_filter_cli_faixa"]
         st.session_state["widget_filter_cli_canal"] = st.session_state["saved_filter_cli_canal"]
 
+        # 4. Popover de Filtros Dinâmicos
         with col_c3:
             st.write("")
             st.write("")
             with st.popover("⚙️ Filtrar por Colunas"):
-                sel_pais_cli = st.multiselect("País:", options=opcoes_pais_cli, key="widget_filter_cli_pais", on_change=lambda: st.session_state.update({"saved_filter_cli_pais": st.session_state["widget_filter_cli_pais"]}))
-                sel_est_cli = st.multiselect("Estado:", options=opcoes_est_cli, key="widget_filter_cli_est", on_change=lambda: st.session_state.update({"saved_filter_cli_est": st.session_state["widget_filter_cli_est"]}))
-                sel_cid_cli = st.multiselect("Cidade:", options=opcoes_cid_cli, key="widget_filter_cli_cid", on_change=lambda: st.session_state.update({"saved_filter_cli_cid": st.session_state["widget_filter_cli_cid"]}))
-                sel_gen_cli = st.multiselect("Gênero:", options=opcoes_gen_cli, key="widget_filter_cli_gen", on_change=lambda: st.session_state.update({"saved_filter_cli_gen": st.session_state["widget_filter_cli_gen"]}))
-                sel_faixa_cli = st.multiselect("Faixa Etária:", options=opcoes_faixa_cli, key="widget_filter_cli_faixa", on_change=lambda: st.session_state.update({"saved_filter_cli_faixa": st.session_state["widget_filter_cli_faixa"]}))
-                sel_canal_cli = st.multiselect("Canal de Aquisição:", options=opcoes_canal_cli, key="widget_filter_cli_canal", on_change=lambda: st.session_state.update({"saved_filter_cli_canal": st.session_state["widget_filter_cli_canal"]}))
+                sel_cluster_cli = st.multiselect(
+                    "Segmento (Cluster):",
+                    options=opcoes_cluster_cli,
+                    key="widget_filter_cli_cluster",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_cluster": st.session_state["widget_filter_cli_cluster"]}),
+                )
+                sel_pais_cli = st.multiselect(
+                    "País:",
+                    options=opcoes_pais_cli,
+                    key="widget_filter_cli_pais",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_pais": st.session_state["widget_filter_cli_pais"]}),
+                )
+                sel_est_cli = st.multiselect(
+                    "Estado:",
+                    options=opcoes_est_cli,
+                    key="widget_filter_cli_est",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_est": st.session_state["widget_filter_cli_est"]}),
+                )
+                sel_cid_cli = st.multiselect(
+                    "Cidade:",
+                    options=opcoes_cid_cli,
+                    key="widget_filter_cli_cid",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_cid": st.session_state["widget_filter_cli_cid"]}),
+                )
+                sel_gen_cli = st.multiselect(
+                    "Gênero:",
+                    options=opcoes_gen_cli,
+                    key="widget_filter_cli_gen",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_gen": st.session_state["widget_filter_cli_gen"]}),
+                )
+                sel_faixa_cli = st.multiselect(
+                    "Faixa Etária:",
+                    options=opcoes_faixa_cli,
+                    key="widget_filter_cli_faixa",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_faixa": st.session_state["widget_filter_cli_faixa"]}),
+                )
+                sel_canal_cli = st.multiselect(
+                    "Canal de Aquisição:",
+                    options=opcoes_canal_cli,
+                    key="widget_filter_cli_canal",
+                    on_change=lambda: st.session_state.update({"saved_filter_cli_canal": st.session_state["widget_filter_cli_canal"]}),
+                )
 
                 if st.button("🔄 Resetar Filtros", use_container_width=True, key="resetar_filtros_c"):
                     for k in chaves_clientes:
@@ -815,7 +886,10 @@ def renderizar(con):
                             del st.session_state[w_key]
                     st.rerun()
 
+        # 5. Aplicação final dos filtros no DataFrame
         df_clientes_filtrado = df_clientes.copy()
+        if sel_cluster_cli:
+            df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["Segmento (Cluster)"].isin(sel_cluster_cli)]
         if sel_pais_cli:
             df_clientes_filtrado = df_clientes_filtrado[df_clientes_filtrado["País"].isin(sel_pais_cli)]
         if sel_est_cli:
@@ -833,6 +907,7 @@ def renderizar(con):
             df_clientes_filtrado,
             column_config={
                 "Data de Cadastro": st.column_config.DateColumn("Data de Cadastro", format="DD/MM/YYYY"),
+                "Segmento (Cluster)": st.column_config.TextColumn("Segmento (Cluster)"),
                 "Quantidade de Usuários": st.column_config.NumberColumn("Quantidade de Usuários", format="%d"),
                 "Quantidade de Pedidos": st.column_config.NumberColumn("Quantidade de Pedidos", format="%d"),
                 "Faturamento Gerado (US$)": st.column_config.NumberColumn("Faturamento Gerado (US$)", format="$ %.2f"),
@@ -843,7 +918,10 @@ def renderizar(con):
             hide_index=True,
         )
 
+        # 6. Cabeçalho de filtros para o Excel
         detalhes_filtros_c = [f"Período: {data_inicio_c.strftime('%d/%m/%Y')} a {data_fim_c.strftime('%d/%m/%Y')}"]
+        if sel_cluster_cli:
+            detalhes_filtros_c.append(f"Cluster: {', '.join(sel_cluster_cli)}")
         if sel_pais_cli:
             detalhes_filtros_c.append(f"País: {', '.join(sel_pais_cli)}")
         if sel_est_cli:
@@ -867,6 +945,62 @@ def renderizar(con):
         )
     else:
         st.warning("Nenhum cliente encontrado para o período de cadastro selecionado.")
+        
+    # ==============================================================================
+    # INVESTIGADOR DE CLIENTE (RASTREADOR DE STATUS E CLUSTER)
+    # ==============================================================================
+    # with st.expander("🔍 Investigar Cliente Específico (Motivo de 'Sem Cluster / Novo')"):
+    #     st.caption(
+    #         "Digite o ID do cliente para entender por que ele não possui cluster atribuído."
+    #     )
+    #     col_inv1, col_inv2 = st.columns([1, 3])
+    #     with col_inv1:
+    #         id_busca = st.number_input(
+    #             "ID do Cliente:", min_value=1, step=1, key="input_id_busca"
+    #         )
+    #         btn_buscar = st.button("🔎 Rastrear", use_container_width=True)
+
+    #     if btn_buscar and id_busca:
+    #         with col_inv2:
+    #             # 1. Verifica histórico de pedidos do cliente no banco
+    #             df_pedidos_usr = con.execute(
+    #                 f"""
+    #                 SELECT 
+    #                     o.order_id AS "ID Pedido",
+    #                     o.status AS "Status",
+    #                     TRY_CAST(o.created_at AS DATE) AS "Data do Pedido",
+    #                     COUNT(oi.id) AS "Total Itens",
+    #                     ROUND(COALESCE(SUM(oi.sale_price), 0), 2) AS "Valor Total (US$)"
+    #                 FROM orders o
+    #                 LEFT JOIN order_items oi ON o.order_id = oi.order_id
+    #                 WHERE o.user_id = {id_busca}
+    #                 GROUP BY o.order_id, o.status, o.created_at
+    #                 ORDER BY o.created_at DESC
+    #                 """
+    #             ).df()
+
+    #             if df_pedidos_usr.empty:
+    #                 st.warning(
+    #                     f"⚠️ **Cliente #{id_busca}**: Está cadastrado na base, mas **NUNCA realizou nenhuma compra** no site (0 pedidos). Por isso está como *'Sem Cluster / Novo'*."
+    #                 )
+    #             else:
+    #                 concluidos = df_pedidos_usr[df_pedidos_usr["Status"] == "Complete"]
+    #                 if concluidos.empty:
+    #                     status_unicos = ", ".join(
+    #                         df_pedidos_usr["Status"].unique().tolist()
+    #                     )
+    #                     st.warning(
+    #                         f"⚠️ **Cliente #{id_busca}**: Possui **{len(df_pedidos_usr)} pedido(s)**, mas **NENHUM** com status `'Complete'`. "
+    #                         f"Status encontrados: **[{status_unicos}]**. O K-Means ignora pedidos não concluídos."
+    #                     )
+    #                 else:
+    #                     st.success(
+    #                         f"✅ **Cliente #{id_busca}**: Possui {len(concluidos)} compra(s) concluída(s) e deveria constar no modelo de clusters."
+    #                     )
+
+    #             # Exibe a tabelinha com os pedidos do cliente consultado
+    #             if not df_pedidos_usr.empty:
+    #                 st.dataframe(df_pedidos_usr, use_container_width=True, hide_index=True)
 
     # ==============================================================================
     # EXPORTAÇÃO CONSOLIDADA NA BARRA LATERAL (MOVIDA PARA O FINAL!)
