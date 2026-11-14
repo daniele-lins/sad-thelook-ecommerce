@@ -48,7 +48,7 @@ O sistema atende à exigência metodológica ao empregar formalmente três funç
 
 3. **Classificação Determinística Baseada em Regras (Rule-Based Classifier)**:
    - **Entrada**: Alavancas promocionais configuradas pelo usuário (Taxa de Resposta Base %, Desconto Promocional %, Custo Fixo por Segmento US$ e Meta de ROMI) cruzadas com os resultados projetados de receita e custos.
-   - **Processamento**: Motor de decisão lógico baseado em heurísticas e condicionais aninhadas (`if-else`), que aplicam funções de decaimento por recência ($e^{-0.5 \cdot \text{recencia\_seg}/\text{recencia\_global}}$) e avaliam o atingimento do ROMI limite em relação à meta fixada.
+   - **Processamento**: Motor de decisão lógico baseado em heurísticas e condicionais aninhadas (`if-else`), que aplicam funções de decaimento por recência (`exp(-0.5 * recencia_seg / recencia_global)`) e avaliam o atingimento do ROMI limite em relação à meta fixada.
    - **Resultado Decisório**: Rotulagem categórica automatizada da viabilidade de cada segmento em **🟢 Bom**, **🟡 Médio** ou **🔴 Ruim**, acompanhada de pareceres prescritivos com recomendações de ação para o gestor.
 
 ---
