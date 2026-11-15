@@ -552,7 +552,7 @@ def renderizar(con):
         texto_eventos_a1 = "Filtros aplicados: " + " | ".join(detalhes_filtros_e)
 
         st.download_button(
-            label="📥 Exportar Analítico de Tráfego em Excel (.xlsx)",
+            label="📥 Exportar em Excel (.xlsx)",
             data=lambda: gerar_excel(df_eventos_filtrado, texto_eventos_a1, nome_aba="Trafego_Web"),
             file_name="trafego.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
