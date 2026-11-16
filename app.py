@@ -66,19 +66,12 @@ else:
         st.session_state.ancora_destino = "relatorios-analiticos"
         st.rerun()
 
-    # 3. Renderização Condicional da Página Selecionada
-    if st.session_state.pagina == "dashboard":
-        dashboard.renderizar(con.cursor())
-    elif st.session_state.pagina == "simulador":
-        simulador.renderizar(con.cursor())
-    elif st.session_state.pagina == "relatorio":
-        relatorios.renderizar(con.cursor())
-
-    # 4. Controle único de rolagem por âncora de título
+    # 3. Dispara o observador de rolagem ANTES de montar os gráficos da nova aba
     ancora = st.session_state.get("ancora_destino")
     if ancora:
         st.session_state.ancora_destino = None
         ts = int(time.time() * 1000)
+        comportamento = "instant"
 
         components.html(
             f"""
@@ -87,20 +80,38 @@ else:
                 (function() {{
                     const doc = window.parent.document;
                     const targetId = {repr(ancora)};
+                    const scrollBehavior = {repr(comportamento)};
 
-                    function executeScroll() {{
+                    function jumpToTarget() {{
                         const targetEl = doc.getElementById(targetId);
                         if (targetEl) {{
-                            targetEl.scrollIntoView({{ behavior: 'smooth', block: 'start' }});
+                            targetEl.scrollIntoView({{ behavior: scrollBehavior, block: 'start' }});
+                            return true;
                         }}
+                        return false;
                     }}
 
-                    executeScroll();
-                    setTimeout(executeScroll, 150);
-                    setTimeout(executeScroll, 400);
+                    if (!jumpToTarget()) {{
+                        const observer = new MutationObserver(() => {{
+                            if (jumpToTarget()) {{
+                                observer.disconnect();
+                            }}
+                        }});
+                        observer.observe(doc.body, {{ childList: true, subtree: true }});
+
+                        setTimeout(() => observer.disconnect(), 1500);
+                    }}
                 }})();
             </script>
             """,
             height=1,
             width=1,
         )
+
+    # 4. Renderização Condicional da Página Selecionada
+    if st.session_state.pagina == "dashboard":
+        dashboard.renderizar(con.cursor())
+    elif st.session_state.pagina == "simulador":
+        simulador.renderizar(con.cursor())
+    elif st.session_state.pagina == "relatorio":
+        relatorios.renderizar(con.cursor())

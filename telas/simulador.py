@@ -116,8 +116,8 @@ def aplicar_kmeans(df_rfm, n_clusters=4):
 
 
 def renderizar(con):
-    st.header("🔮 Módulo de Simulação Preditiva & Clusterização de Clientes")
-    st.markdown(
+    st.title("🔮 Módulo de Simulação Preditiva & Clusterização de Clientes")
+    st.caption(
         "Este módulo combina **Clusterização K-Means (k=4)** baseada em **RFM** e um **Simulador Preditivo 'What-If'** com taxa de resposta ajustada por segmento."
     )
     
