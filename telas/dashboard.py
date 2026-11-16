@@ -31,7 +31,9 @@ def renderizar(con):
         "SELECT DISTINCT traffic_source FROM users WHERE traffic_source IS NOT NULL ORDER BY traffic_source"
     ).fetchall()
     origens = ["Todas as origens"] + [r[0] for r in origens_raw]
-    filtro_origem = st.sidebar.selectbox("Origem de tráfego", origens)
+    filtro_origem = st.sidebar.selectbox(
+        "Origem de tráfego", origens, key="dash_origem"
+    )
 
     # --- 2. Filtro de Calendário ---
     min_max_dates = con.execute(
@@ -47,13 +49,13 @@ def renderizar(con):
         if (min_max_dates and min_max_dates[1])
         else datetime.date(2024, 12, 31)
     )
-
     intervalo_datas = st.sidebar.date_input(
         "Período do Filtro",
         value=(data_min, data_max),
         min_value=data_min,
         max_value=data_max,
         format="DD/MM/YYYY",
+        key="dash_datas",
     )
 
     # --- 3. Filtros Geográficos (País e Estado) ---
@@ -62,7 +64,10 @@ def renderizar(con):
     ).fetchall()
     paises_disponiveis = [r[0] for r in paises_raw]
     paises_selecionados = st.sidebar.multiselect(
-        "Países", options=paises_disponiveis, placeholder="Todos os países"
+        "Países",
+        options=paises_disponiveis,
+        placeholder="Todos os países",
+        key="dash_paises",
     )
 
     if paises_selecionados:
@@ -75,14 +80,15 @@ def renderizar(con):
         """
         estados_raw = con.execute(sql_estados, paises_selecionados).fetchall()
     else:
-        sql_estados = (
-            "SELECT DISTINCT state FROM users WHERE state IS NOT NULL ORDER BY state"
-        )
+        sql_estados = "SELECT DISTINCT state FROM users WHERE state IS NOT NULL ORDER BY state"
         estados_raw = con.execute(sql_estados).fetchall()
 
     estados_disponiveis = [r[0] for r in estados_raw]
     estados_selecionados = st.sidebar.multiselect(
-        "Estados", options=estados_disponiveis, placeholder="Todos os estados"
+        "Estados",
+        options=estados_disponiveis,
+        placeholder="Todos os estados",
+        key="dash_estados",
     )
 
     st.sidebar.markdown("---")
@@ -91,7 +97,10 @@ def renderizar(con):
     # --- 4. Filtro de Gênero ---
     genero_opcoes = {"Todos": None, "Feminino": "F", "Masculino": "M"}
     filtro_genero_rotulo = st.sidebar.radio(
-        "Gênero do Cliente", list(genero_opcoes.keys()), horizontal=True
+        "Gênero do Cliente",
+        list(genero_opcoes.keys()),
+        horizontal=True,
+        key="dash_genero",
     )
     filtro_genero = genero_opcoes[filtro_genero_rotulo]
 
@@ -103,17 +112,16 @@ def renderizar(con):
     max_age_bd = (
         int(idade_min_max[1]) if (idade_min_max and idade_min_max[1]) else 70
     )
-
     faixa_idade = st.sidebar.slider(
         "Faixa Etária (Anos)",
         min_value=min_age_bd,
         max_value=max_age_bd,
         value=(min_age_bd, max_age_bd),
+        key="dash_idade",
     )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("📦 Filtros de Produto e Logística")
-    # escrever observação embaixo do subheader bem pequenininho
     st.sidebar.caption("(Não altera dados de tráfego e funil)")
 
     # --- 6. Filtro de Categoria ---
@@ -122,7 +130,10 @@ def renderizar(con):
     ).fetchall()
     cats_disponiveis = [r[0] for r in cats_raw]
     cats_selecionadas = st.sidebar.multiselect(
-        "Categorias", options=cats_disponiveis, placeholder="Todas as categorias"
+        "Categorias",
+        options=cats_disponiveis,
+        placeholder="Todas as categorias",
+        key="dash_cats",
     )
 
     # --- 7. Filtro de Marca ---
@@ -131,18 +142,46 @@ def renderizar(con):
     ).fetchall()
     marcas_disponiveis = [r[0] for r in marcas_raw]
     marcas_selecionadas = st.sidebar.multiselect(
-        "Marcas", options=marcas_disponiveis, placeholder="Todas as marcas"
+        "Marcas",
+        options=marcas_disponiveis,
+        placeholder="Todas as marcas",
+        key="dash_marcas",
     )
 
     # --- 8. Filtro de Centro de Distribuição ---
     cds_raw = con.execute(
         "SELECT id, name FROM distribution_centers ORDER BY name"
     ).fetchall()
-    cds_dict = {r[1]: r[0] for r in cds_raw}  # Mapeia Nome do CD -> ID do CD
+    cds_dict = {r[1]: r[0] for r in cds_raw}
     cds_selecionados = st.sidebar.multiselect(
         "Centro de Distribuição",
         options=list(cds_dict.keys()),
         placeholder="Todos os CDs",
+        key="dash_cds",
+    )
+
+    # ==========================================
+    # BOTÃO DE LIMPEZA (CALLBACK DE RESET VISUAL)
+    # ==========================================
+    st.sidebar.markdown("---")
+
+
+    def resetar_filtros_dashboard():
+        st.session_state["dash_origem"] = "Todas as origens"
+        st.session_state["dash_datas"] = (data_min, data_max)
+        st.session_state["dash_paises"] = []
+        st.session_state["dash_estados"] = []
+        st.session_state["dash_genero"] = "Todos"
+        st.session_state["dash_idade"] = (min_age_bd, max_age_bd)
+        st.session_state["dash_cats"] = []
+        st.session_state["dash_marcas"] = []
+        st.session_state["dash_cds"] = []
+
+
+    st.sidebar.button(
+        "🔄 Limpar Filtros",
+        on_click=resetar_filtros_dashboard,
+        use_container_width=True,
     )
 
     # ==========================================
