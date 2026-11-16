@@ -544,7 +544,6 @@ def renderizar(con):
     # DIRECIONADOR PARA O RELATÓRIO ANALÍTICO DOS CLUSTERS
     # ==============================================================================
     st.markdown("---")
-    # Caixa destacada para chamar a atenção do usuário
     with st.container(border=True):
         col_txt, col_btn = st.columns([2.2, 1])
         with col_txt:
@@ -562,4 +561,5 @@ def renderizar(con):
                 use_container_width=True,
             ):
                 st.session_state.pagina = "relatorio"
+                st.session_state.ancora_destino = "parecer-da-simulacao-e-diagnostico-dos-clusters"
                 st.rerun()
